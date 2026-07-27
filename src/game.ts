@@ -8,7 +8,17 @@ import { Wind } from './wind';
 
 const MAX_DT = 0.05;
 const WAVE_DRIFT = 14;
-const PLAYER_RELOAD = 1.4;
+
+// ── Ammo magazine (practice-mode variation, player only) ──────────────────────
+// Instead of an automatic per-broadside cooldown, the player carries a finite
+// magazine that holds exactly MAG_BROADSIDES broadsides. Ammo is counted in
+// individual bullets so the pip HUD scales with ship size (capacity = guns ×
+// MAG_BROADSIDES). Each broadside/torpedo consumes one broadside's worth; a
+// short cadence keeps the shots distinct. When the magazine can't field a full
+// broadside the player must press R for a MAG_RELOAD-second refill to full.
+const MAG_BROADSIDES = 3; // full magazine = 3 broadsides for every hull
+const MAG_RELOAD = 2; // s to reload and refill the magazine
+const SHOT_CADENCE = 0.35; // s between successive broadsides while ammo lasts
 
 export const DIFFICULTIES = {
   easy: { label: 'Easy', reload: 2.2, leadShots: false, windAware: false },
@@ -46,6 +56,9 @@ export class Game {
   private gameOverFired = false;
   private diveCharge: number = DIVE.max; // player submarine dive charge
   private ramCd = 0; // s until this pair of hulls can ram-damage again
+  private ammo = 0; // player bullets remaining in the magazine
+  private ammoCap = 0; // player magazine capacity (guns × MAG_BROADSIDES)
+  private reloadTimer = 0; // s left on the manual reload, 0 when not reloading
 
   /** Set by main.ts; called once when the battle ends (won = enemy sunk). */
   onGameOver: ((won: boolean) => void) | null = null;
@@ -119,6 +132,9 @@ export class Game {
     this.difficulty = difficulty;
     this.player = new Ship(w * 0.3, h * 0.6, -Math.PI / 4, PLAYER_COLOR, playerType);
     this.enemy = new Ship(w * 0.7, h * 0.3, Math.PI * 0.75, ENEMY_COLOR, resolvedEnemy);
+    this.ammoCap = this.player.guns * MAG_BROADSIDES;
+    this.ammo = this.ammoCap;
+    this.reloadTimer = 0;
     this.diveCharge = DIVE.max;
     this.ramCd = 0;
     this.cannonballs = [];
@@ -145,6 +161,8 @@ export class Game {
     const heading = Math.atan2(this.player.y - ey, this.player.x - ex);
     this.enemy = new Ship(ex, ey, heading, ENEMY_COLOR, type);
     this.difficulty = difficulty;
+    this.ammo = this.ammoCap; // fresh magazine for each new foe
+    this.reloadTimer = 0;
     this.ramCd = 0;
     this.cannonballs = [];
     this.explosions = [];
@@ -259,10 +277,29 @@ export class Game {
     this.updateRam(dt, w, h);
 
     if (!this.over) {
+      // Advance any manual reload in progress; refill the magazine when done.
+      if (this.reloadTimer > 0) {
+        this.reloadTimer = Math.max(0, this.reloadTimer - dt);
+        if (this.reloadTimer === 0) this.ammo = this.ammoCap;
+      }
+
+      // R begins a reload; on touch (no R key), a fire tap while empty does too.
+      // Only useful when the magazine isn't already full or reloading.
+      const wantReload =
+        this.input.wasPressed('KeyR') ||
+        (this.isTouchDevice && this.input.isDown('Space') && this.ammo < this.player.guns);
+      if (this.reloadTimer === 0 && this.ammo < this.ammoCap && wantReload) {
+        this.reloadTimer = MAG_RELOAD;
+      }
+
+      // Fire only with a full broadside's worth of ammo loaded and off cadence.
       // Submarines can launch torpedoes surfaced or submerged.
-      if (this.input.isDown('Space') && this.player.reload <= 0) {
+      const canFire =
+        this.reloadTimer === 0 && this.ammo >= this.player.guns && this.player.reload <= 0;
+      if (this.input.isDown('Space') && canFire) {
         if (this.player.type === 'submarine') this.fireTorpedo();
-        else this.fireBroadside(this.player, PLAYER_RELOAD);
+        else this.fireBroadside(this.player, SHOT_CADENCE);
+        this.ammo -= this.player.guns;
         this.onCannonFire?.();
         haptic(15);
       }
@@ -357,7 +394,7 @@ export class Game {
         true,
       ),
     );
-    p.reload = PLAYER_RELOAD;
+    p.reload = SHOT_CADENCE;
   }
 
   private fireBroadside(shooter: Ship, reload: number) {
@@ -403,6 +440,7 @@ export class Game {
       ctx.fillStyle = '#4fd8ef';
       ctx.fillRect(this.player.x - w2 / 2, y, (w2 * this.diveCharge) / DIVE.max, 3);
     }
+    if (this.player.alive && !this.over) this.drawAmmo();
     for (const ex of this.explosions) ex.draw(ctx);
 
     // Mobile assist: flag shots that are about to reach you.
@@ -423,6 +461,43 @@ export class Game {
 
     if (this.isTouchDevice && !this.over) {
       this.touch.draw(ctx, this.viewW, this.viewH, this.player?.type === 'submarine');
+    }
+  }
+
+  /** Magazine HUD under the player: one pip per bullet (bright = loaded), a
+   *  reload progress bar while reloading, and a prompt to press R when spent. */
+  private drawAmmo() {
+    const ctx = this.ctx;
+    const p = this.player;
+    // Sit below the hull — and below the submarine's dive bar when present.
+    const y = p.y + p.length * (p.type === 'submarine' ? 0.9 : 0.62);
+    const pipW = 7;
+    const pipH = 5;
+    const gap = 3;
+    const totalW = this.ammoCap * (pipW + gap) - gap;
+    const x0 = p.x - totalW / 2;
+
+    if (this.reloadTimer > 0) {
+      // Reloading: a shrinking-to-full amber bar spanning the pip row.
+      const prog = 1 - this.reloadTimer / MAG_RELOAD;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillRect(x0 - 1, y - 1, totalW + 2, pipH + 2);
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(x0, y, totalW * prog, pipH);
+    } else {
+      for (let i = 0; i < this.ammoCap; i++) {
+        ctx.fillStyle = i < this.ammo ? '#ffd75e' : 'rgba(0, 0, 0, 0.45)';
+        ctx.fillRect(x0 + i * (pipW + gap), y, pipW, pipH);
+      }
+    }
+
+    // Prompt to reload once the magazine can't field a full broadside.
+    if (this.reloadTimer === 0 && this.ammo < p.guns) {
+      ctx.font = 'bold 12px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#ffd75e';
+      ctx.fillText('Press R to reload', p.x, y + pipH + 4);
     }
   }
 
