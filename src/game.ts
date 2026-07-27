@@ -13,12 +13,12 @@ const WAVE_DRIFT = 14;
 // Instead of an automatic per-broadside cooldown, the player carries a finite
 // magazine that holds exactly MAG_BROADSIDES broadsides. Ammo is counted in
 // individual bullets so the pip HUD scales with ship size (capacity = guns ×
-// MAG_BROADSIDES). Each broadside/torpedo consumes one broadside's worth; a
-// short cadence keeps the shots distinct. When the magazine can't field a full
-// broadside the player must press R for a MAG_RELOAD-second refill to full.
+// MAG_BROADSIDES). Each broadside/torpedo consumes one broadside's worth, and
+// the whole magazine can be emptied back-to-back with no gap between shots.
+// When it can't field a full broadside the player presses R for a
+// MAG_RELOAD-second refill to full.
 const MAG_BROADSIDES = 3; // full magazine = 3 broadsides for every hull
 const MAG_RELOAD = 2; // s to reload and refill the magazine
-const SHOT_CADENCE = 0.35; // s between successive broadsides while ammo lasts
 
 export const DIFFICULTIES = {
   easy: { label: 'Easy', reload: 2.2, leadShots: false, windAware: false },
@@ -292,13 +292,13 @@ export class Game {
         this.reloadTimer = MAG_RELOAD;
       }
 
-      // Fire only with a full broadside's worth of ammo loaded and off cadence.
-      // Submarines can launch torpedoes surfaced or submerged.
-      const canFire =
-        this.reloadTimer === 0 && this.ammo >= this.player.guns && this.player.reload <= 0;
+      // Fire whenever a full broadside's worth of ammo is loaded — no cadence,
+      // so the magazine can be emptied back-to-back. Submarines can launch
+      // torpedoes surfaced or submerged.
+      const canFire = this.reloadTimer === 0 && this.ammo >= this.player.guns;
       if (this.input.isDown('Space') && canFire) {
         if (this.player.type === 'submarine') this.fireTorpedo();
-        else this.fireBroadside(this.player, SHOT_CADENCE);
+        else this.fireBroadside(this.player, 0);
         this.ammo -= this.player.guns;
         this.onCannonFire?.();
         haptic(15);
@@ -394,7 +394,7 @@ export class Game {
         true,
       ),
     );
-    p.reload = SHOT_CADENCE;
+    p.reload = 0; // no cadence — the magazine gates firing now
   }
 
   private fireBroadside(shooter: Ship, reload: number) {
@@ -450,11 +450,12 @@ export class Game {
       }
     }
 
-    this.drawHealthRow(`You (${this.player.type})`, this.player, 0);
-    this.drawHealthRow(
-      `Enemy (${this.enemy.type} · ${DIFFICULTIES[this.difficulty].label})`,
+    // Health rides just above each hull (the same spot multiplayer uses), so
+    // your ship carries both readouts — health above, ammo below.
+    this.drawShipHealth(this.player, `You · ${this.player.type}`);
+    this.drawShipHealth(
       this.enemy,
-      1,
+      `Enemy · ${this.enemy.type} · ${DIFFICULTIES[this.difficulty].label}`,
     );
     if (this.survivorKills !== null) this.drawKillCounter();
     this.drawWindIndicator();
@@ -518,47 +519,52 @@ export class Game {
     }
   }
 
-  private drawHealthRow(label: string, ship: Ship, row: number) {
+  /** Segmented health bar floating just above the hull, colored by how hurt
+   *  the ship is (green → amber → red), with a caption above it. Matches the
+   *  multiplayer look so both modes read the same. */
+  private drawShipHealth(ship: Ship, label: string) {
+    if (ship.sinkProgress >= 1) return;
     const ctx = this.ctx;
-    const segW = 14;
-    const segH = 10;
-    const gap = 3;
-    const margin = 16;
+    const n = ship.maxHealth;
+    const segW = 8;
+    const segH = 5;
+    const gap = 2;
+    const totalW = n * (segW + gap) - gap;
+    const x0 = ship.x - totalW / 2;
+    const y = ship.y - ship.length * 0.62;
+    const frac = ship.health / ship.maxHealth;
+    const col = frac > 0.5 ? '#5bd15f' : frac > 0.25 ? '#e6b422' : '#e8503a';
 
-    const y = margin + row * (segH + 12);
-    const totalW = ship.maxHealth * (segW + gap) - gap;
-    const x0 = this.viewW - margin - totalW;
+    ctx.save();
+    ctx.globalAlpha = 1 - ship.sinkProgress;
 
-    ctx.font = '13px system-ui, sans-serif';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = '#fff';
-    ctx.fillText(label, x0 - 10, y + segH / 2);
+    ctx.font = '11px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.fillText(label, ship.x, y - 4);
 
-    for (let i = 0; i < ship.maxHealth; i++) {
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(x0 - 1.5, y - 1.5, totalW + 3, segH + 3);
+    for (let i = 0; i < n; i++) {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
       ctx.fillRect(x0 + i * (segW + gap), y, segW, segH);
       const f = Math.max(0, Math.min(1, ship.health - i)); // partial-fill the edge pip
       if (f > 0) {
-        ctx.fillStyle = '#4caf50';
+        ctx.fillStyle = col;
         ctx.fillRect(x0 + i * (segW + gap), y, segW * f, segH);
       }
     }
+    ctx.restore();
   }
 
   private drawKillCounter() {
     const ctx = this.ctx;
-    const margin = 16;
-    const segH = 10;
-    const rowH = segH + 12;
-    // Sits below the two health rows.
-    const y = margin + 2 * rowH + 4;
-
     ctx.font = 'bold 13px system-ui, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#ffd75e';
-    ctx.fillText(`⚓ ${this.survivorKills} sunk`, this.viewW - margin, y);
+    ctx.fillText(`⚓ ${this.survivorKills} sunk`, this.viewW - 16, 22);
   }
 
   private drawWindIndicator() {
