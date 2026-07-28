@@ -47,6 +47,16 @@ export const MAX_PLAYERS = 21; // one human host + up to 20 bots (or more humans
 const MAX_DT = 0.05;
 const RELOAD = 1.4; // s between broadsides, same for everyone
 
+// ── Ammo magazine ─────────────────────────────────────────────────────────────
+// Every ship carries a finite magazine of MAG_BROADSIDES volleys (capacity in
+// shells = guns × MAG_BROADSIDES). Firing is edge-triggered: one volley per
+// trigger press, no cadence, until the magazine can't field a full volley —
+// then R reloads over MAG_RELOAD seconds (bots reload automatically). The
+// Rapid Fire pickup bypasses the magazine entirely; 2× Fire spends one volley
+// slot but fires both sides, so the same 3 presses throw twice the shells.
+const MAG_BROADSIDES = 3; // volleys per full magazine
+const MAG_RELOAD = 2; // s to reload and refill
+
 // ── Power-ups ─────────────────────────────────────────────────────────────────
 const MG_RELOAD = 0.16; // machine-gun cadence
 const MG_DURATION = 5; // s of continuous fire
@@ -124,7 +134,7 @@ const PICKUP_META: Record<PickupType, { icon: string; color: string; label: stri
   health: { icon: '➕', color: '#e8503a', label: '+1 HEALTH' },
   shield: { icon: '⛨', color: '#3aa0e8', label: 'SHIELD ×5' },
   speed: { icon: '⚡', color: '#e8c53a', label: '2× SPEED' },
-  double: { icon: '⇄', color: '#7bd15f', label: 'DBL BROADSIDE' },
+  double: { icon: '⇄', color: '#7bd15f', label: '2× FIRE' },
   machinegun: { icon: '⁘', color: '#e8892a', label: 'RAPID FIRE' },
 };
 const ZERO_TIMERS: Record<PickupType, number> = {
@@ -313,6 +323,7 @@ interface HostPlayer {
   turn: Turn;
   fire: boolean;
   dive: boolean;
+  reload: boolean; // latched R request (humans); consumed by the fire tick
 }
 
 export interface MpCallbacks {
@@ -378,6 +389,10 @@ export class MpSession {
   private timeLeft = -1; // Leaderboard match seconds remaining (host computes, guest mirrors); -1 = untimed
   private diveCharge: number[] = []; // per-ship submarine dive charge (host)
   private guestCharge: number[] = []; // dive charge fractions mirrored from snapshots (guest)
+  private mag: number[] = []; // shells left in each ship's magazine (host)
+  private magCap: number[] = []; // magazine capacity per ship = guns × MAG_BROADSIDES (host)
+  private reloadT: number[] = []; // seconds left on each ship's reload, 0 = loaded (host)
+  private firePrev: boolean[] = []; // last frame's trigger state, for edge detection (host)
   private eyeR = EYE_MAX; // whirlpool eye radius (host computes, guest mirrors)
   private freeze = 0; // start-of-round locate-your-ship pause (host computes, guest mirrors)
   private mode: MpMode = 'score'; // win condition (host picks in the lobby, guest mirrors)
@@ -475,7 +490,7 @@ export class MpSession {
   ): MpSession {
     const s = new MpSession(true, ctx, input, cb, sounds);
     s.players = [
-      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false },
+      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false, reload: false },
     ];
     // Open the lobby immediately so bot play never waits on (or requires) the
     // matchmaking broker; the room code fills in when/if the broker responds.
@@ -553,6 +568,7 @@ export class MpSession {
       turn: 0,
       fire: false,
       dive: false,
+      reload: false,
     };
   }
 
@@ -687,6 +703,7 @@ export class MpSession {
         turn: 0,
         fire: false,
         dive: false,
+        reload: false,
       });
       this.pushLobby();
       return;
@@ -705,6 +722,7 @@ export class MpSession {
       player.turn = msg.turn === -1 || msg.turn === 1 ? msg.turn : 0;
       player.fire = !!msg.fire;
       player.dive = !!msg.dive;
+      if (msg.reload) player.reload = true; // latch only; the fire tick clears it
     }
   }
 
@@ -758,6 +776,7 @@ export class MpSession {
       turn: 0,
       fire: false,
       dive: false,
+      reload: false,
     };
     this.players.push(player);
     const i = this.players.length - 1;
@@ -782,6 +801,11 @@ export class MpSession {
     this.respawnAt.push(Infinity);
     this.moveFreezeUntil.push(this.clock + RESPAWN_FREEZE);
     this.diveCharge.push(DIVE_MAX);
+    const cap = SHIP_TYPES[spawn.type].guns * MAG_BROADSIDES;
+    this.magCap.push(cap);
+    this.mag.push(cap);
+    this.reloadT.push(0);
+    this.firePrev.push(false);
 
     // Everyone already sailing learns about the new ship; the newcomer gets
     // the full battle state addressed to them. Both precede the next snapshot
@@ -872,6 +896,10 @@ export class MpSession {
     this.moveFreezeUntil = this.spawns.map(() => 0);
     this.timeLeft = this.mode === 'score' ? MATCH_DURATION : -1;
     this.diveCharge = this.spawns.map(() => DIVE_MAX);
+    this.magCap = this.spawns.map((sp) => SHIP_TYPES[sp.type].guns * MAG_BROADSIDES);
+    this.mag = this.magCap.slice();
+    this.reloadT = this.spawns.map(() => 0);
+    this.firePrev = this.spawns.map(() => false);
     this.eyeR = EYE_MAX;
     this.pickupTimers = { ...ZERO_TIMERS };
     for (const type of PICKUP_ORDER) {
@@ -882,6 +910,7 @@ export class MpSession {
     for (const p of this.players) {
       p.turn = 0;
       p.fire = false;
+      p.reload = false;
     }
 
     this.players.forEach((p, i) => {
@@ -930,6 +959,7 @@ export class MpSession {
             : 0;
       this.players[0].fire = this.input.isDown('Space');
       this.players[0].dive = this.input.isDown('ArrowDown') || this.input.isDown('KeyS');
+      if (this.input.wasPressed('KeyR')) this.players[0].reload = true; // latch; fire tick consumes
 
       const eye =
         this.eyeR < EYE_MAX ? { x: WORLD_W / 2, y: WORLD_H / 2, r: this.eyeR } : undefined;
@@ -992,41 +1022,72 @@ export class MpSession {
     if (this.phase === 'battle') {
       this.ships.forEach((ship, i) => {
         if (!ship.alive || !this.players[i].connected) return;
+
+        // Advance the magazine reload for every live ship (even while frozen or
+        // submerged); refill the instant it completes.
+        if (this.reloadT[i] > 0) {
+          this.reloadT[i] = Math.max(0, this.reloadT[i] - dt);
+          if (this.reloadT[i] === 0) this.mag[i] = this.magCap[i];
+        }
+
         if (this.moveFrozen(i)) return; // just respawned — guns still holstered
         const b = this.buffs[i];
+        const bot = this.players[i].bot;
         const sub = ship.type === 'submarine';
         if (ship.depth > 0.15 && !sub) return; // only subs can shoot from underwater
 
-        // Machine gun: rapid continuous fire (torpedo stream for submarines).
+        // Rapid Fire: continuous stream that bypasses the magazine entirely.
         if (b.mgUntil > this.clock) {
           if (ship.reload <= 0) {
             if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
             else this.fireSide(ship, 1, MG_RELOAD);
             this.pendingEvents.push({ e: 'fire', by: i });
           }
+          this.firePrev[i] = this.players[i].fire;
           return;
         }
 
-        if (!this.players[i].fire || ship.reload > 0) return;
+        // A human fires one volley per fresh trigger press (edge-triggered, no
+        // cadence). A bot fires on a steady cadence so it spends the magazine
+        // judiciously instead of dumping it in a few frames.
+        const held = this.players[i].fire;
+        const triggered = bot ? held && ship.reload <= 0 : held && !this.firePrev[i];
+        this.firePrev[i] = held;
 
+        // Reload: bots the moment they can't field a full volley; humans on R
+        // (or, on touch, a fire tap while empty). A pending arming shot is exempt.
+        const cantVolley = this.mag[i] < ship.guns;
+        const wantReload = bot ? cantVolley : this.players[i].reload || (triggered && cantVolley);
+        this.players[i].reload = false; // consume the latched R request
+        if (this.reloadT[i] === 0 && this.mag[i] < this.magCap[i] && wantReload && !b.mgArmed) {
+          this.reloadT[i] = MAG_RELOAD;
+        }
+
+        // A freshly grabbed Rapid Fire arms on the next press and bypasses ammo.
         if (b.mgArmed) {
-          // The trigger shot arms 5 s of machine-gun fire.
+          if (!triggered) return;
           b.mgArmed = false;
           b.mgUntil = this.clock + MG_DURATION;
           if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
           else this.fireSide(ship, 1, MG_RELOAD);
-        } else if (b.doubleUntil > this.clock) {
-          if (sub) {
-            // Double for a submarine: a two-torpedo spread off the bow.
-            this.fireTorpedo(ship, RELOAD, 0.07);
-          } else {
-            this.fireBoth(ship);
-          }
+          this.pendingEvents.push({ e: 'fire', by: i });
+          return;
+        }
+
+        // Normal magazine fire — needs a fresh trigger, no reload underway, and
+        // a full volley's worth of shells loaded.
+        if (!triggered || this.reloadT[i] > 0 || this.mag[i] < ship.guns) return;
+        if (b.doubleUntil > this.clock) {
+          // 2× Fire: both sides for a single volley slot (a doubled magazine).
+          if (sub) this.fireTorpedo(ship, 0, 0.07);
+          else this.fireBoth(ship);
         } else if (sub) {
-          this.fireTorpedo(ship, RELOAD, 0);
+          this.fireTorpedo(ship, 0, 0);
         } else {
           this.fireBroadside(ship);
         }
+        ship.reload = bot ? RELOAD : 0; // bots pace themselves; humans gate on the magazine
+        this.mag[i] -= ship.guns;
         this.pendingEvents.push({ e: 'fire', by: i });
       });
     }
@@ -1298,6 +1359,10 @@ export class MpSession {
     // A respawn is a clean slate — old power-ups don't carry over.
     this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false };
     this.diveCharge[i] = DIVE_MAX;
+    this.mag[i] = this.magCap[i]; // fresh magazine, nothing reloading
+    this.reloadT[i] = 0;
+    this.firePrev[i] = false;
+    this.players[i].reload = false;
     this.spawnUntil[i] = this.clock + SPAWN_PROTECT; // shield bubble + glow, like the start
     this.moveFreezeUntil[i] = this.clock + RESPAWN_FREEZE; // hold the helm for a beat
     this.respawnAt[i] = Infinity;
@@ -1554,6 +1619,8 @@ export class MpSession {
         charge: this.diveCharge[i] / DIVE_MAX,
         score: this.scoreView[i]?.score ?? 0,
         kills: this.scoreView[i]?.kills ?? 0,
+        ammo: this.mag[i] ?? 0,
+        rl: this.reloadT[i] > 0 ? this.reloadT[i] / MAG_RELOAD : 0,
       })),
       balls: this.balls.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, tp: b.torpedo })),
       wind: this.wind.direction,
@@ -1614,6 +1681,8 @@ export class MpSession {
           charge: 1,
           score: 0,
           kills: 0,
+          ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
+          rl: 0,
         }));
         this.buffView = msg.ships.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
         this.scoreView = msg.ships.map(() => ({ score: 0, kills: 0 }));
@@ -1654,6 +1723,8 @@ export class MpSession {
             charge: 1,
             score: 0,
             kills: 0,
+            ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
+            rl: 0,
           });
           this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
           this.scoreView.push({ score: 0, kills: 0 });
@@ -1697,16 +1768,20 @@ export class MpSession {
             : 0;
       const fire = this.input.isDown('Space');
       const dive = this.input.isDown('ArrowDown') || this.input.isDown('KeyS');
+      // A one-shot reload pulse (touch taps to reload are inferred host-side
+      // from an empty-magazine fire, so only the R key needs sending).
+      const reload = this.input.wasPressed('KeyR');
       this.inputAcc += dt;
       if (
         turn !== this.lastSent.turn ||
         fire !== this.lastSent.fire ||
         dive !== this.lastSent.dive ||
+        reload ||
         this.inputAcc >= INPUT_INTERVAL
       ) {
         this.inputAcc = 0;
         this.lastSent = { turn, fire, dive };
-        if (this.conn?.open) this.conn.send({ t: 'input', turn, fire, dive } satisfies C2HMsg);
+        if (this.conn?.open) this.conn.send({ t: 'input', turn, fire, dive, reload } satisfies C2HMsg);
       }
     }
 
@@ -2003,6 +2078,7 @@ export class MpSession {
         if (i === this.you) {
           this.drawYouMarker(ship);
           if (ship.type === 'submarine') this.drawDiveMeter(ship, i);
+          this.drawShipAmmo(ship);
         }
       }
     });
@@ -2243,6 +2319,50 @@ export class MpSession {
     ctx.fillRect(ship.x - w / 2 - 1, y - 1, w + 2, 5);
     ctx.fillStyle = '#4fd8ef';
     ctx.fillRect(ship.x - w / 2, y, w * Math.max(0, Math.min(1, frac)), 3);
+    ctx.restore();
+  }
+
+  /** Your own magazine: gold shells just below the hull, an amber bar while
+   *  reloading, and a prompt once spent. Only drawn for the local player —
+   *  enemies just reload silently. Reads host state directly, guest state from
+   *  the latest snapshot. */
+  private drawShipAmmo(ship: Ship) {
+    const cap = ship.guns * MAG_BROADSIDES;
+    const ammo = this.isHost ? (this.mag[this.you] ?? cap) : (this.targets[this.you]?.ammo ?? cap);
+    const rl = this.isHost
+      ? this.reloadT[this.you] > 0
+        ? this.reloadT[this.you] / MAG_RELOAD
+        : 0
+      : (this.targets[this.you]?.rl ?? 0);
+
+    const ctx = this.ctx;
+    const pipW = 6;
+    const pipH = 4;
+    const gap = 2;
+    const totalW = cap * (pipW + gap) - gap;
+    const x0 = ship.x - totalW / 2;
+    const y = ship.y + ship.length * 0.62; // below the hull (health rides above)
+
+    ctx.save();
+    ctx.globalAlpha = 1 - ship.sinkProgress;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(x0 - 1.5, y - 1.5, totalW + 3, pipH + 3);
+    if (rl > 0) {
+      ctx.fillStyle = '#ffb300';
+      ctx.fillRect(x0, y, totalW * (1 - rl), pipH);
+    } else {
+      for (let k = 0; k < cap; k++) {
+        ctx.fillStyle = k < ammo ? '#ffd75e' : 'rgba(255, 255, 255, 0.18)';
+        ctx.fillRect(x0 + k * (pipW + gap), y, pipW, pipH);
+      }
+    }
+    if (rl === 0 && ammo < ship.guns) {
+      ctx.font = 'bold 11px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#ffd75e';
+      ctx.fillText('Press R to reload', ship.x, y + pipH + 3);
+    }
     ctx.restore();
   }
 
