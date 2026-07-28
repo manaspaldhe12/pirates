@@ -57,6 +57,8 @@ export interface ShipState {
   charge: number; // submarine dive charge, 0..1
   score: number; // weighted battle score
   kills: number; // enemies sunk
+  ammo: number; // shells left in the magazine (host-authoritative)
+  rl: number; // magazine reload progress remaining, 1→0; 0 = loaded
 }
 
 export interface BallState {
@@ -82,7 +84,7 @@ export type C2HMsg =
   | { t: 'hello'; name: string }
   | { t: 'choose'; ship: ShipTypeName }
   | { t: 'ready'; ready: boolean }
-  | { t: 'input'; turn: Turn; fire: boolean; dive: boolean };
+  | { t: 'input'; turn: Turn; fire: boolean; dive: boolean; reload: boolean; touch: boolean };
 
 /** Host → guest. */
 export type H2CMsg =
