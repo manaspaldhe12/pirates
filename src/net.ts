@@ -84,7 +84,7 @@ export type C2HMsg =
   | { t: 'hello'; name: string }
   | { t: 'choose'; ship: ShipTypeName }
   | { t: 'ready'; ready: boolean }
-  | { t: 'input'; turn: Turn; fire: boolean; dive: boolean; reload: boolean };
+  | { t: 'input'; turn: Turn; fire: boolean; dive: boolean; reload: boolean; touch: boolean };
 
 /** Host → guest. */
 export type H2CMsg =

@@ -324,6 +324,7 @@ interface HostPlayer {
   fire: boolean;
   dive: boolean;
   reload: boolean; // latched R request (humans); consumed by the fire tick
+  touch: boolean; // captain is on a touch screen (no R key — taps reload instead)
 }
 
 export interface MpCallbacks {
@@ -490,7 +491,7 @@ export class MpSession {
   ): MpSession {
     const s = new MpSession(true, ctx, input, cb, sounds);
     s.players = [
-      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false, reload: false },
+      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false, reload: false, touch: false },
     ];
     // Open the lobby immediately so bot play never waits on (or requires) the
     // matchmaking broker; the room code fills in when/if the broker responds.
@@ -569,6 +570,7 @@ export class MpSession {
       fire: false,
       dive: false,
       reload: false,
+      touch: false,
     };
   }
 
@@ -704,6 +706,7 @@ export class MpSession {
         fire: false,
         dive: false,
         reload: false,
+        touch: false,
       });
       this.pushLobby();
       return;
@@ -723,6 +726,7 @@ export class MpSession {
       player.fire = !!msg.fire;
       player.dive = !!msg.dive;
       if (msg.reload) player.reload = true; // latch only; the fire tick clears it
+      player.touch = !!msg.touch;
     }
   }
 
@@ -777,6 +781,7 @@ export class MpSession {
       fire: false,
       dive: false,
       reload: false,
+      touch: false,
     };
     this.players.push(player);
     const i = this.players.length - 1;
@@ -960,6 +965,7 @@ export class MpSession {
       this.players[0].fire = this.input.isDown('Space');
       this.players[0].dive = this.input.isDown('ArrowDown') || this.input.isDown('KeyS');
       if (this.input.wasPressed('KeyR')) this.players[0].reload = true; // latch; fire tick consumes
+      this.players[0].touch = this.isTouchDevice;
 
       const eye =
         this.eyeR < EYE_MAX ? { x: WORLD_W / 2, y: WORLD_H / 2, r: this.eyeR } : undefined;
@@ -1036,9 +1042,11 @@ export class MpSession {
         const sub = ship.type === 'submarine';
         if (ship.depth > 0.15 && !sub) return; // only subs can shoot from underwater
 
-        // Rapid Fire: continuous stream that bypasses the magazine entirely.
+        // Rapid Fire: a continuous stream *while the trigger is held*, bypassing
+        // the magazine. Letting go stops it — the buff buys you 5 s of cadence,
+        // not 5 s of shooting on its own.
         if (b.mgUntil > this.clock) {
-          if (ship.reload <= 0) {
+          if (this.players[i].fire && ship.reload <= 0) {
             if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
             else this.fireSide(ship, 1, MG_RELOAD);
             this.pendingEvents.push({ e: 'fire', by: i });
@@ -1054,10 +1062,13 @@ export class MpSession {
         const triggered = bot ? held && ship.reload <= 0 : held && !this.firePrev[i];
         this.firePrev[i] = held;
 
-        // Reload: bots the moment they can't field a full volley; humans on R
-        // (or, on touch, a fire tap while empty). A pending arming shot is exempt.
+        // Reload: bots the moment they can't field a full volley; humans on R.
+        // Touch captains have no R key, so for them (and only them) a fire tap
+        // on a dry magazine stands in for it. A pending arming shot is exempt.
         const cantVolley = this.mag[i] < ship.guns;
-        const wantReload = bot ? cantVolley : this.players[i].reload || (triggered && cantVolley);
+        const wantReload = bot
+          ? cantVolley
+          : this.players[i].reload || (this.players[i].touch && triggered && cantVolley);
         this.players[i].reload = false; // consume the latched R request
         if (this.reloadT[i] === 0 && this.mag[i] < this.magCap[i] && wantReload && !b.mgArmed) {
           this.reloadT[i] = MAG_RELOAD;
@@ -1781,7 +1792,8 @@ export class MpSession {
       ) {
         this.inputAcc = 0;
         this.lastSent = { turn, fire, dive };
-        if (this.conn?.open) this.conn.send({ t: 'input', turn, fire, dive, reload } satisfies C2HMsg);
+        if (this.conn?.open)
+          this.conn.send({ t: 'input', turn, fire, dive, reload, touch: this.isTouchDevice } satisfies C2HMsg);
       }
     }
 
