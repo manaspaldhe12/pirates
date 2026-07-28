@@ -1833,6 +1833,7 @@ export class MpSession {
     this.lastTime = now;
     if (this.isHost) this.hostUpdate(dt);
     else this.guestUpdate(dt);
+    this.input.clearPressed(); // edge keys (R) are per-frame — without this they latch forever
     this.render();
     requestAnimationFrame(this.frame);
   };
