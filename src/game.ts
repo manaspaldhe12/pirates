@@ -240,7 +240,8 @@ export class Game {
       const dy = this.touch.steerPt.y - h / 2;
       if (Math.hypot(dx, dy) > WHEEL_DEADZONE) tt = turnToward(Math.atan2(dy, dx), this.player.heading);
     }
-    this.input.setVirtual(tt === -1, tt === 1, this.touch.consumeFire(), this.touch.dive);
+    const touchFire = this.touch.consumeFire(); // one true per tap (edge-triggered)
+    this.input.setVirtual(tt === -1, tt === 1, touchFire, this.touch.dive);
 
     let turn: Turn = 0;
     if (this.input.isDown('ArrowLeft') || this.input.isDown('KeyA')) turn = -1;
@@ -283,20 +284,25 @@ export class Game {
         if (this.reloadTimer === 0) this.ammo = this.ammoCap;
       }
 
+      // Firing is edge-triggered: one broadside per press/tap, so a held key
+      // no longer dumps the whole magazine in a few frames. Rapid taps still
+      // fire back-to-back with no enforced gap.
+      const firePressed = this.input.wasPressed('Space') || touchFire;
+
       // R begins a reload; on touch (no R key), a fire tap while empty does too.
       // Only useful when the magazine isn't already full or reloading.
       const wantReload =
         this.input.wasPressed('KeyR') ||
-        (this.isTouchDevice && this.input.isDown('Space') && this.ammo < this.player.guns);
+        (this.isTouchDevice && firePressed && this.ammo < this.player.guns);
       if (this.reloadTimer === 0 && this.ammo < this.ammoCap && wantReload) {
         this.reloadTimer = MAG_RELOAD;
       }
 
       // Fire whenever a full broadside's worth of ammo is loaded — no cadence,
-      // so the magazine can be emptied back-to-back. Submarines can launch
-      // torpedoes surfaced or submerged.
+      // so taps can be as fast as you like. Submarines can launch torpedoes
+      // surfaced or submerged.
       const canFire = this.reloadTimer === 0 && this.ammo >= this.player.guns;
-      if (this.input.isDown('Space') && canFire) {
+      if (firePressed && canFire) {
         if (this.player.type === 'submarine') this.fireTorpedo();
         else this.fireBroadside(this.player, 0);
         this.ammo -= this.player.guns;
