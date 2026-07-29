@@ -23,22 +23,23 @@ const EDGE_MARGIN = 110; // keep a navigable corridor along world edges (ships w
 const ISLAND_GAP = 150; // min water gap between islands so ships can slip through
 const SPAWN_CLEARANCE = 210; // open water guaranteed around each spawn point
 
-export function generateIslands(
-  worldW: number,
-  worldH: number,
-  spawns: Array<{ x: number; y: number }>,
-): IslandData[] {
-  const islands: IslandData[] = [];
-  const target = 5;
-  let attempts = 0;
+// Island archetypes — all built from circles, so collision, line-of-sight and
+// bot avoidance work unchanged. 'blob' is the classic roundish cay; the rest
+// are chains of overlapping circles laid along a path: 'ridge' runs straight,
+// 'arc' bends one way like an atoll rim, 'hook' curls tighter and tighter
+// toward one tip. Every battle deals a different count and mix (always with at
+// least one elongated shape), so no two maps read alike.
+type IslandShape = 'blob' | 'ridge' | 'arc' | 'hook';
 
-  while (islands.length < target && attempts < 400) {
-    attempts++;
-    const r = 34 + Math.random() * 40;
-    const x = EDGE_MARGIN + r + Math.random() * (worldW - 2 * (EDGE_MARGIN + r));
-    const y = EDGE_MARGIN + r + Math.random() * (worldH - 2 * (EDGE_MARGIN + r));
+const SHAPES: IslandShape[] = ['blob', 'ridge', 'arc', 'hook'];
 
+function makeShape(kind: IslandShape, worldW: number, worldH: number): IslandCircle[] {
+  const x = EDGE_MARGIN + 80 + Math.random() * (worldW - 2 * (EDGE_MARGIN + 80));
+  const y = EDGE_MARGIN + 80 + Math.random() * (worldH - 2 * (EDGE_MARGIN + 80));
+
+  if (kind === 'blob') {
     // Main body plus up to two smaller lobes for irregular coastlines.
+    const r = 34 + Math.random() * 40;
     const circles: IslandCircle[] = [{ x, y, r }];
     const lobes = Math.floor(Math.random() * 3);
     for (let i = 0; i < lobes; i++) {
@@ -49,7 +50,56 @@ export function generateIslands(
         r: r * (0.45 + Math.random() * 0.35),
       });
     }
+    return circles;
+  }
 
+  // Elongated shapes: walk a path, dropping overlapping circles. The radius
+  // swells amidships and tapers to the tips, so the coastline reads as one
+  // long island rather than a row of beads.
+  const steps = 4 + Math.floor(Math.random() * 3); // 4–6 circles
+  const base = 24 + Math.random() * 10; // amidships radius
+  let heading = Math.random() * Math.PI * 2;
+  // ridge: dead straight (a grain of jitter); arc: steady bend either way;
+  // hook: the bend itself grows each step, curling the tail in.
+  let bend = kind === 'ridge' ? 0 : (Math.random() < 0.5 ? -1 : 1) * (0.22 + Math.random() * 0.18);
+  const bendGrow = kind === 'hook' ? 1.45 : 1;
+
+  const circles: IslandCircle[] = [];
+  let px = x;
+  let py = y;
+  for (let i = 0; i < steps; i++) {
+    const taper = 0.55 + 0.45 * Math.sin((Math.PI * i) / (steps - 1)); // thin→fat→thin
+    const r = base * taper;
+    circles.push({ x: px, y: py, r });
+    const next = base * (0.55 + 0.45 * Math.sin((Math.PI * (i + 1)) / (steps - 1)));
+    px += Math.cos(heading) * (r + next) * 0.62;
+    py += Math.sin(heading) * (r + next) * 0.62;
+    heading += bend + (Math.random() - 0.5) * 0.12;
+    bend *= bendGrow;
+  }
+  return circles;
+}
+
+export function generateIslands(
+  worldW: number,
+  worldH: number,
+  spawns: Array<{ x: number; y: number }>,
+): IslandData[] {
+  const islands: IslandData[] = [];
+  // A different hand every battle: 4–6 islands, shuffled shapes, and always
+  // at least one elongated island in the mix.
+  const target = 4 + Math.floor(Math.random() * 3);
+  const deck: IslandShape[] = ['ridge', 'blob'];
+  while (deck.length < target) deck.push(SHAPES[Math.floor(Math.random() * SHAPES.length)]);
+  for (let i = deck.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+
+  let attempts = 0;
+  while (islands.length < target && attempts < 600) {
+    attempts++;
+    const circles = makeShape(deck[islands.length], worldW, worldH);
     if (!fits(circles, islands, spawns, worldW, worldH)) continue;
     islands.push({ circles, palms: makePalms(circles) });
   }
@@ -88,8 +138,11 @@ function fits(
 function makePalms(circles: IslandCircle[]): Palm[] {
   const palms: Palm[] = [];
   for (const c of circles) {
-    if (c.r < 46) continue;
-    const count = 1 + Math.floor(Math.random() * 2);
+    // Big cays carry a small grove; the modest circles of an elongated chain
+    // get the odd lone palm so long islands aren't bare sandbars.
+    if (c.r < 26) continue;
+    if (c.r < 46 && Math.random() > 0.4) continue;
+    const count = c.r < 46 ? 1 : 1 + Math.floor(Math.random() * 2);
     for (let i = 0; i < count; i++) {
       const a = Math.random() * Math.PI * 2;
       const d = Math.random() * c.r * 0.4;
