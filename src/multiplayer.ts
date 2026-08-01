@@ -103,9 +103,10 @@ const RESPAWN_BAND = 0.25; // respawn within the central 50% of the map (0.25–
 // Open water required around a respawn point — roughly a second of sailing at
 // small-ship speed, so nobody rematerializes about to beach themselves.
 const RESPAWN_CLEAR = 110;
-// The storm holds off until the final stretch, then ramps to full by time-up —
-// and respawns stop the moment it sets in, so the last 20 s are sudden death.
-const STORM_WINDOW = 20; // s of maelstrom finale at the end of a Leaderboard match
+// The sea starts pulling in early and squeezes harder for the rest of the
+// match. Once it sets in, sunk bots are out for good — the field thins as the
+// arena shrinks — while human captains keep respawning to the final whistle.
+const STORM_START = 25; // s into a Leaderboard match when the maelstrom forms
 
 // Whirlpool (maelstrom): a growing vortex at the arena center that drags every
 // ship inward and shreds anyone caught outside its shrinking eye. Radial, so it
@@ -1139,12 +1140,13 @@ export class MpSession {
     }
     this.balls = this.balls.filter((b) => !b.spent);
 
-    // Leaderboard: sunk ships respawn in the middle of the map after a pause —
-    // but once the storm sets in for the finale, deaths are permanent. Do this
-    // after all damage for the tick so a ship that died this frame starts its
-    // death timer immediately.
+    // Leaderboard: sunk ships respawn in the middle of the map after a pause.
+    // Once the storm sets in, bot deaths become permanent (the field thins as
+    // the sea pulls in) while humans keep coming back. Do this after all damage
+    // for the tick so a ship that died this frame starts its death timer
+    // immediately.
     this.timeLeft = this.mode === 'score' ? Math.max(0, MATCH_DURATION - this.clock) : -1;
-    if (this.phase === 'battle' && this.mode === 'score' && !this.stormActive()) this.updateRespawns();
+    if (this.phase === 'battle' && this.mode === 'score') this.updateRespawns();
 
     this.updateBuffView();
 
@@ -1157,11 +1159,14 @@ export class MpSession {
     if (this.phase === 'battle') {
       let matchOver: boolean;
       if (this.mode === 'score') {
-        // Timed match — but once the storm's sudden death has set in (no more
-        // respawns), a lone survivor ends it early rather than making everyone
-        // watch the rest of the countdown.
-        const alive = this.ships.filter((s) => s.alive).length;
-        matchOver = this.clock >= MATCH_DURATION || (this.stormActive() && alive <= 1);
+        // Timed match — but once the storm has thinned the field to a single
+        // contender, end early rather than making everyone watch the countdown.
+        // Humans respawn all match, so a human mid-death-pause still counts as
+        // a contender; a sunk bot in the storm is out for good and doesn't.
+        const contenders = this.ships.filter(
+          (s, i) => s.alive || (!this.players[i].bot && this.players[i].connected),
+        ).length;
+        matchOver = this.clock >= MATCH_DURATION || (this.stormActive() && contenders <= 1);
       } else {
         const alive = this.ships.filter((s) => s.alive).length;
         const humansAlive = this.players.some((p, i) => !p.bot && this.ships[i].alive);
@@ -1345,6 +1350,7 @@ export class MpSession {
     for (let i = 0; i < this.ships.length; i++) {
       if (this.ships[i].alive) continue;
       if (!this.players[i].connected) continue; // a captain who left stays sunk
+      if (this.players[i].bot && this.stormActive()) continue; // storm: bots stay down
       if (this.respawnAt[i] === Infinity) {
         this.respawnAt[i] = this.clock + DEATH_PAUSE; // just went down — start the count
       } else if (this.clock >= this.respawnAt[i]) {
@@ -1429,19 +1435,18 @@ export class MpSession {
 
   // ── Whirlpool (host) ────────────────────────────────────────────────────────
 
-  /** True once the Leaderboard storm has set in (its final-stretch sudden death). */
+  /** True once the Leaderboard storm has set in (no more bot respawns). */
   private stormActive(): boolean {
-    return this.mode === 'score' && this.clock >= MATCH_DURATION - STORM_WINDOW;
+    return this.mode === 'score' && this.clock >= STORM_START;
   }
 
   /** Maelstrom strength for the current clock: 0 before it forms → 1 at full.
-   *  Leaderboard holds the storm until the last STORM_WINDOW seconds, then ramps
-   *  it to full right as the clock runs out. Survivor keeps the slow build. */
+   *  Leaderboard starts the squeeze at STORM_START and tightens steadily until
+   *  the clock runs out. Survivor keeps its own slow build. */
   private whirlStrength(): number {
     if (this.mode === 'score') {
-      const start = MATCH_DURATION - STORM_WINDOW;
-      if (this.clock < start) return 0;
-      return Math.min((this.clock - start) / STORM_WINDOW, 1);
+      if (this.clock < STORM_START) return 0;
+      return Math.min((this.clock - STORM_START) / (MATCH_DURATION - STORM_START), 1);
     }
     if (this.clock < WHIRL_START) return 0;
     return Math.min((this.clock - WHIRL_START) / WHIRL_RAMP, 1);

@@ -668,6 +668,18 @@ canvas {
   padding: 6px 6px;
 }
 
+/* Final standings: your whole row in the ship pink (reads well on the dark
+ * panel), every other captain stays white. */
+#mpend-board .lb-row.you,
+#mpend-board .lb-row.you .lb-rank,
+#mpend-board .lb-row.you .lb-kills {
+  color: #ff5fae;
+}
+
+#mpend-board .lb-row.you {
+  background: rgba(255, 79, 160, 0.14);
+}
+
 #mpend-board:empty {
   display: none;
 }
