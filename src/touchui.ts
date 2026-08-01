@@ -15,6 +15,24 @@ export function touchCapable(): boolean {
   return window.matchMedia?.('(any-pointer: coarse)').matches ?? false;
 }
 
+// Capability isn't use: a Surface or other touchscreen laptop played with a
+// keyboard should get desktop rules (press R to reload, no forced fullscreen)
+// until a finger actually lands. One real touch flips the session for good.
+let sawRealTouch = false;
+window.addEventListener(
+  'touchstart',
+  () => {
+    sawRealTouch = true;
+  },
+  { passive: true, once: true },
+);
+
+/** True once this session has seen a real touch — the signal that the player
+ *  is steering with the screen rather than merely owning one that could. */
+export function touchActive(): boolean {
+  return sawRealTouch;
+}
+
 const TURN_DEADZONE = 0.12; // rad — stop turning when close enough to the course
 
 /** Which way to turn to reach `desired`, re-evaluated per frame against the

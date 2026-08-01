@@ -36,7 +36,7 @@ import {
 } from './net';
 import { DIVE, gunOffsets, muzzleReach, RAM, SAIL_TYPES, Ship, SHIP_TYPES, wrapDelta, YOU_COLOR, type ShipTypeName, type Turn } from './ship';
 import type { GameSounds } from './sounds';
-import { drawThreatArc, haptic, incomingThreats, TouchControls, touchCapable, turnToward } from './touchui';
+import { drawThreatArc, haptic, incomingThreats, TouchControls, touchActive, turnToward } from './touchui';
 import { Wind } from './wind';
 import type { DataConnection } from 'peerjs';
 
@@ -404,9 +404,10 @@ export class MpSession {
   private waves: Wave[] = [];
   private looping = false;
   private lastTime = 0;
-  // Not readonly: some WebViews under-report touch capability, so the first
-  // real touch event anywhere upgrades this at runtime.
-  private isTouchDevice = touchCapable();
+  // Actual touch use, not capability — a touchscreen laptop on the keyboard
+  // gets desktop rules. Seeded from any touch earlier this session, upgraded
+  // by the first real touch event after construction.
+  private isTouchDevice = touchActive();
   private touch = new TouchControls();
   private prevMyKills = 0; // last frame's own kill count, for the kill fanfare
   private prevMeAlive = true; // last frame's own alive flag, for the sunk cue
@@ -1984,25 +1985,35 @@ export class MpSession {
       ctx.restore();
       this.drawEdgeIndicators(cx, cy, vw, vh, scale, cw, ch);
     } else {
-      // Letterbox: the whole arena scaled to fit, as always on big screens.
+      // The whole arena scaled to fit, as always on big screens. The world
+      // wraps, so the margins a mismatched aspect leaves over aren't dead
+      // letterbox bars — they show the wrapped continuation of the sea, and
+      // the border stroke marks where the wrap seam actually is.
       const ox = (cw - WORLD_W * fit) / 2;
       const oy = (ch - WORLD_H * fit) / 2;
+      ctx.fillStyle = '#2e6da6';
+      ctx.fillRect(0, 0, cw, ch);
       ctx.save();
       ctx.translate(ox, oy);
       ctx.scale(fit, fit);
-      ctx.beginPath();
-      ctx.rect(0, 0, WORLD_W, WORLD_H);
-      ctx.clip();
-      ctx.fillStyle = '#2e6da6';
-      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-      this.drawWorld(now);
+      // Only one axis can have margins (fit exact-fills the other), so this
+      // draws the world once, plus a wrapped copy per uncovered side.
+      const xs = ox > 0 ? [-WORLD_W, 0, WORLD_W] : [0];
+      const ys = oy > 0 ? [-WORLD_H, 0, WORLD_H] : [0];
+      for (const tx of xs) {
+        for (const ty of ys) {
+          ctx.save();
+          ctx.translate(tx, ty);
+          this.drawWorld(now);
+          ctx.restore();
+        }
+      }
       ctx.restore();
 
       // World border so the wrap edge is visible.
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
       ctx.lineWidth = 2;
       ctx.strokeRect(ox, oy, WORLD_W * fit, WORLD_H * fit);
-
     }
 
     this.drawHud();

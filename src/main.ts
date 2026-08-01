@@ -4,7 +4,7 @@ import { MpSession, MAX_PLAYERS, crewColor, type LeaderboardEntry } from './mult
 import { CODE_LENGTH, type LobbyPlayerInfo, type MpMode } from './net';
 import { SAIL_TYPES, SHIP_TYPES, type ShipTypeName } from './ship';
 import { createSounds } from './sounds';
-import { haptic, requestGameFullscreen, touchCapable } from './touchui';
+import { haptic, requestGameFullscreen, touchActive } from './touchui';
 import './style.css';
 
 // Sound on/off, remembered across sessions. OFF by default — audio is opt-in;
@@ -500,7 +500,9 @@ function mpCallbacks() {
     onStart() {
       // Hosts reach here inside the Start Battle tap, so the fullscreen +
       // landscape request can succeed; for guests (no gesture) it's a no-op.
-      if (touchCapable()) void requestGameFullscreen();
+      // Gated on actual touch use so a touchscreen laptop played with the
+      // keyboard stays windowed like any other desktop.
+      if (touchActive()) void requestGameFullscreen();
       // Late joiners drop straight from the menu into a running battle, so
       // clear the menu/status too — not just the lobby overlays.
       menuOverlay.classList.add('hidden');
@@ -582,6 +584,8 @@ mpCreateBtn.addEventListener('click', () => {
   mpCreateBtn.disabled = true;
   mpJoinBtn.disabled = true;
   mp = MpSession.host(mpNameInput.value, ctx, input, mpCallbacks(), sounds);
+  // Dev-only hook so E2E tests can observe the session; stripped in prod.
+  if (import.meta.env.DEV) (window as unknown as { __mp: MpSession }).__mp = mp;
 });
 
 mpJoinBtn.addEventListener('click', () => {
