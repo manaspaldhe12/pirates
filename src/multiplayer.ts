@@ -40,8 +40,15 @@ import { drawThreatArc, haptic, incomingThreats, TouchControls, touchActive, tur
 import { Wind } from './wind';
 import type { DataConnection } from 'peerjs';
 
-export const WORLD_W = 1600;
-export const WORLD_H = 1000;
+// Baseline arena. The battle actually plays on a world with this same AREA
+// but shaped to the host's window (clamped to sane landscape aspects), so the
+// game fills the screen it's hosted on instead of letterboxing a fixed box
+// into it. Guests receive the dimensions in the 'start' message.
+const WORLD_W = 1600;
+const WORLD_H = 1000;
+const WORLD_AREA = WORLD_W * WORLD_H;
+const ASPECT_MIN = 1.2; // portrait-ish hosts still get a landscape sea
+const ASPECT_MAX = 2.4; // ultrawide monitors don't stretch the world absurd
 
 export const MAX_PLAYERS = 21; // one human host + up to 20 bots (or more humans)
 const MAX_DT = 0.05;
@@ -227,13 +234,15 @@ const BOT_NAMES = [
 
 // Spawn points evenly spaced on a ring so a crowded free-for-all starts fair,
 // every ship facing the melee at the center.
-const SPAWNS: Array<{ x: number; y: number }> = Array.from({ length: MAX_PLAYERS }, (_, i) => {
-  const a = -Math.PI / 2 + (i / MAX_PLAYERS) * Math.PI * 2;
-  return {
-    x: WORLD_W / 2 + Math.cos(a) * WORLD_W * 0.4,
-    y: WORLD_H / 2 + Math.sin(a) * WORLD_H * 0.4,
-  };
-});
+function spawnRing(worldW: number, worldH: number): Array<{ x: number; y: number }> {
+  return Array.from({ length: MAX_PLAYERS }, (_, i) => {
+    const a = -Math.PI / 2 + (i / MAX_PLAYERS) * Math.PI * 2;
+    return {
+      x: worldW / 2 + Math.cos(a) * worldW * 0.4,
+      y: worldH / 2 + Math.sin(a) * worldH * 0.4,
+    };
+  });
+}
 
 interface Wave {
   x: number;
@@ -406,6 +415,10 @@ export class MpSession {
   private waves: Wave[] = [];
   private looping = false;
   private lastTime = 0;
+  // Arena dimensions for the current battle: the classic area, shaped to the
+  // host's window (host computes at battle start; guests mirror from 'start').
+  private worldW = WORLD_W;
+  private worldH = WORLD_H;
   // Actual touch use, not capability — a touchscreen laptop on the keyboard
   // gets desktop rules. Seeded from any touch earlier this session, upgraded
   // by the first real touch event after construction.
@@ -430,8 +443,8 @@ export class MpSession {
     if (import.meta.env.DEV) (window as unknown as { __mp: MpSession }).__mp = this;
     for (let i = 0; i < 40; i++) {
       this.waves.push({
-        x: Math.random() * WORLD_W,
-        y: Math.random() * WORLD_H,
+        x: Math.random() * this.worldW,
+        y: Math.random() * this.worldH,
         r: 6 + Math.random() * 10,
       });
     }
@@ -826,6 +839,8 @@ export class MpSession {
       ships: this.spawns,
       you: i,
       mode: this.mode,
+      w: this.worldW,
+      h: this.worldH,
     } satisfies H2CMsg);
   }
 
@@ -861,8 +876,16 @@ export class MpSession {
     this.touch.reset();
     this.prevMyKills = 0;
     this.prevMeAlive = true;
+    // Shape the sea to the window hosting it: same total area as the classic
+    // 1600×1000 (density and pacing unchanged), aspect from the host's own
+    // viewport — so the battle fills the screen edge to edge, like practice.
+    const aspect = Math.min(ASPECT_MAX, Math.max(ASPECT_MIN, this.viewW / Math.max(1, this.viewH)));
+    this.worldW = Math.round(Math.sqrt(WORLD_AREA * aspect));
+    this.worldH = Math.round(WORLD_AREA / this.worldW);
+    this.scatterWaves();
+    const ring = spawnRing(this.worldW, this.worldH);
     this.spawns = this.players.map((p, i) => {
-      const s = SPAWNS[i];
+      const s = ring[i];
       return {
         name: p.name,
         type: p.ship,
@@ -874,7 +897,7 @@ export class MpSession {
         heading: Math.random() * Math.PI * 2,
       };
     });
-    this.islands = generateIslands(WORLD_W, WORLD_H, SPAWNS.slice(0, this.players.length));
+    this.islands = generateIslands(this.worldW, this.worldH, ring.slice(0, this.players.length));
     this.ships = this.spawns.map((sp) => new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type));
     this.ships[0].hullColor = YOU_COLOR; // your own hull is always pink (host is idx 0)
     this.freeze = START_FREEZE;
@@ -931,6 +954,8 @@ export class MpSession {
           ships: this.spawns,
           you: i,
           mode: this.mode,
+          w: this.worldW,
+          h: this.worldH,
         } satisfies H2CMsg);
       }
     });
@@ -973,7 +998,7 @@ export class MpSession {
       this.players[0].touch = this.isTouchDevice;
 
       const eye =
-        this.eyeR < EYE_MAX ? { x: WORLD_W / 2, y: WORLD_H / 2, r: this.eyeR } : undefined;
+        this.eyeR < EYE_MAX ? { x: this.worldW / 2, y: this.worldH / 2, r: this.eyeR } : undefined;
       this.players.forEach((p, i) => {
         if (!p.bot) return;
         const d = decideBot(
@@ -1016,7 +1041,7 @@ export class MpSession {
       // Submarines are engine-powered — the wind never touches them. A frozen
       // ship has zero drive, so it stays put where it respawned.
       const sf = frozen ? 0 : ship.type === 'submarine' ? 1 : this.wind.speedFactor(ship.heading);
-      ship.update(dt, turn, WORLD_W, WORLD_H, sf);
+      ship.update(dt, turn, this.worldW, this.worldH, sf);
       // Running aground is fatal — islands are obstacles, not bumpers.
       // (Spawn-protected ships are unsinkable for their grace period.)
       if (ship.alive && this.spawnUntil[i] <= this.clock && shipHitsIsland(this.islands, ship)) {
@@ -1115,14 +1140,14 @@ export class MpSession {
     }
 
     for (const ball of this.balls) {
-      ball.update(dt, WORLD_W, WORLD_H);
+      ball.update(dt, this.worldW, this.worldH);
       // After the round is decided, in-flight shots fly on harmlessly — no more
       // damage or score changes, so the final board matches the declared winner.
       if (ball.spent || this.phase !== 'battle') continue;
       for (const ship of this.ships) {
         if (ship === ball.owner || !ship.alive) continue;
         if (ship.depth > SUB_IMMUNE) continue; // shots pass over a submerged sub
-        if (ship.containsPointWrapped(ball.x, ball.y, WORLD_W, WORLD_H)) {
+        if (ship.containsPointWrapped(ball.x, ball.y, this.worldW, this.worldH)) {
           ball.spent = true;
           const si = this.ships.indexOf(ship);
           if (this.spawnUntil[si] > this.clock) {
@@ -1272,8 +1297,8 @@ export class MpSession {
         if (!B.alive || B.depth > SUB_IMMUNE) continue;
 
         // Nearest-image delta so ramming works across the wrap seam too.
-        const dx = wrapDelta(B.x - A.x, WORLD_W);
-        const dy = wrapDelta(B.y - A.y, WORLD_H);
+        const dx = wrapDelta(B.x - A.x, this.worldW);
+        const dy = wrapDelta(B.y - A.y, this.worldH);
         const dist = Math.hypot(dx, dy) || 0.001;
         const contact = A.length * 0.42 + B.length * 0.42;
         if (dist >= contact) continue;
@@ -1400,10 +1425,10 @@ export class MpSession {
    *  and not right on top of a ship that's still afloat. */
   private pickRespawnSpot(width: number): { x: number; y: number } {
     const span = 1 - 2 * RESPAWN_BAND;
-    let spot = { x: WORLD_W / 2, y: WORLD_H / 2 };
+    let spot = { x: this.worldW / 2, y: this.worldH / 2 };
     for (let attempt = 0; attempt < 40; attempt++) {
-      const x = WORLD_W * (RESPAWN_BAND + Math.random() * span);
-      const y = WORLD_H * (RESPAWN_BAND + Math.random() * span);
+      const x = this.worldW * (RESPAWN_BAND + Math.random() * span);
+      const y = this.worldH * (RESPAWN_BAND + Math.random() * span);
       if (shipHitsIsland(this.islands, { x, y, width }) || this.nearIsland(x, y, RESPAWN_CLEAR)) continue;
       spot = { x, y };
       if (this.ships.every((s) => !s.alive || Math.hypot(s.x - x, s.y - y) > 140)) break;
@@ -1431,8 +1456,8 @@ export class MpSession {
       const h = base + (k * Math.PI * 2) / tries;
       let clear = true;
       for (const d of [70, 140, 210]) {
-        const px = (((x + Math.cos(h) * d) % WORLD_W) + WORLD_W) % WORLD_W;
-        const py = (((y + Math.sin(h) * d) % WORLD_H) + WORLD_H) % WORLD_H;
+        const px = (((x + Math.cos(h) * d) % this.worldW) + this.worldW) % this.worldW;
+        const py = (((y + Math.sin(h) * d) % this.worldH) + this.worldH) % this.worldH;
         if (this.nearIsland(px, py, 30)) {
           clear = false;
           break;
@@ -1469,8 +1494,8 @@ export class MpSession {
     this.eyeR = EYE_MAX - (EYE_MAX - EYE_MIN) * s;
     if (s <= 0) return;
 
-    const cx = WORLD_W / 2;
-    const cy = WORLD_H / 2;
+    const cx = this.worldW / 2;
+    const cy = this.worldH / 2;
     this.ships.forEach((ship) => {
       if (!ship.alive) return;
       const dx = cx - ship.x;
@@ -1546,10 +1571,10 @@ export class MpSession {
         x = c.x + Math.cos(a) * d;
         y = c.y + Math.sin(a) * d;
       } else {
-        x = 120 + Math.random() * (WORLD_W - 240);
-        y = 120 + Math.random() * (WORLD_H - 240);
+        x = 120 + Math.random() * (this.worldW - 240);
+        y = 120 + Math.random() * (this.worldH - 240);
       }
-      if (x < 40 || x > WORLD_W - 40 || y < 40 || y > WORLD_H - 40) continue;
+      if (x < 40 || x > this.worldW - 40 || y < 40 || y > this.worldH - 40) continue;
       if (islandHitsPoint(this.islands, x, y)) continue; // not on land
       if (this.pickups.some((q) => Math.hypot(q.x - x, q.y - y) < 90)) continue; // spread out
       return { x, y };
@@ -1686,6 +1711,12 @@ export class MpSession {
         this.touch.reset();
         this.prevMyKills = 0;
         this.prevMeAlive = true;
+        // Mirror the host's arena shape (guard: an older host omits it).
+        if (msg.w && msg.h) {
+          this.worldW = msg.w;
+          this.worldH = msg.h;
+          this.scatterWaves();
+        }
         this.islands = msg.islands;
         this.spawns = msg.ships;
         this.you = msg.you;
@@ -1867,12 +1898,21 @@ export class MpSession {
     requestAnimationFrame(this.frame);
   };
 
+  /** Re-scatter the decorative waves across the current world dimensions —
+   *  called whenever the arena takes a new shape at battle start. */
+  private scatterWaves() {
+    for (const wave of this.waves) {
+      wave.x = Math.random() * this.worldW;
+      wave.y = Math.random() * this.worldH;
+    }
+  }
+
   private driftWaves(dt: number) {
     const wdx = Math.cos(this.wind.direction) * WAVE_DRIFT * dt;
     const wdy = Math.sin(this.wind.direction) * WAVE_DRIFT * dt;
     for (const wave of this.waves) {
-      wave.x = (wave.x + wdx + WORLD_W) % WORLD_W;
-      wave.y = (wave.y + wdy + WORLD_H) % WORLD_H;
+      wave.x = (wave.x + wdx + this.worldW) % this.worldW;
+      wave.y = (wave.y + wdy + this.worldH) % this.worldH;
     }
   }
 
@@ -1949,7 +1989,7 @@ export class MpSession {
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0); // pixel-sharp on scaled displays
     const cw = this.viewW;
     const ch = this.viewH;
-    const fit = Math.min(cw / WORLD_W, ch / WORLD_H);
+    const fit = Math.min(cw / this.worldW, ch / this.worldH);
 
     // Backdrop (visible as letterbox bars; overdrawn entirely in follow mode).
     ctx.fillStyle = '#16293f';
@@ -1973,18 +2013,18 @@ export class MpSession {
       // led slightly ahead so there's more sea in front than behind. Floors at
       // "one world tile fills the screen" per axis, so the viewport never
       // exceeds the world and at most 2×2 wrapped tiles show.
-      const scale = Math.max(FOLLOW_SCALE, cw / WORLD_W, ch / WORLD_H);
+      const scale = Math.max(FOLLOW_SCALE, cw / this.worldW, ch / this.worldH);
       const vw = cw / scale;
       const vh = ch / scale;
       const cx = me.x + Math.cos(me.heading) * CAM_LOOKAHEAD;
       const cy = me.y + Math.sin(me.heading) * CAM_LOOKAHEAD;
-      const camX = (((cx - vw / 2) % WORLD_W) + WORLD_W) % WORLD_W;
-      const camY = (((cy - vh / 2) % WORLD_H) + WORLD_H) % WORLD_H;
+      const camX = (((cx - vw / 2) % this.worldW) + this.worldW) % this.worldW;
+      const camY = (((cy - vh / 2) % this.worldH) + this.worldH) % this.worldH;
       ctx.save();
       ctx.scale(scale, scale);
       ctx.translate(-camX, -camY);
-      const xs = camX + vw > WORLD_W ? [0, WORLD_W] : [0];
-      const ys = camY + vh > WORLD_H ? [0, WORLD_H] : [0];
+      const xs = camX + vw > this.worldW ? [0, this.worldW] : [0];
+      const ys = camY + vh > this.worldH ? [0, this.worldH] : [0];
       for (const tx of xs) {
         for (const ty of ys) {
           ctx.save();
@@ -2001,17 +2041,17 @@ export class MpSession {
       // screen hides ~5% of the world at the top and bottom). The wrap seams
       // sit exactly on the window edges of the fitted axis, so no border is
       // drawn — and edge arrows point at any ship sailing a hidden strip.
-      const scale = Math.max(cw / WORLD_W, ch / WORLD_H);
-      const ox = (cw - WORLD_W * scale) / 2; // ≤ 0 — centered crop
-      const oy = (ch - WORLD_H * scale) / 2;
+      const scale = Math.max(cw / this.worldW, ch / this.worldH);
+      const ox = (cw - this.worldW * scale) / 2; // ≤ 0 — centered crop
+      const oy = (ch - this.worldH * scale) / 2;
       ctx.save();
       ctx.translate(ox, oy);
       ctx.scale(scale, scale);
       ctx.fillStyle = '#2e6da6';
-      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      ctx.fillRect(0, 0, this.worldW, this.worldH);
       this.drawWorld(now);
       ctx.restore();
-      this.drawEdgeIndicators(WORLD_W / 2, WORLD_H / 2, cw / scale, ch / scale, scale, cw, ch);
+      this.drawEdgeIndicators(this.worldW / 2, this.worldH / 2, cw / scale, ch / scale, scale, cw, ch);
     }
 
     this.drawHud();
@@ -2037,8 +2077,8 @@ export class MpSession {
       if (i === this.you) continue;
       const ship = this.ships[i];
       if (!ship.alive || ship.depth > DIVE.hidden) continue;
-      const dx = wrapDelta(ship.x - cx, WORLD_W);
-      const dy = wrapDelta(ship.y - cy, WORLD_H);
+      const dx = wrapDelta(ship.x - cx, this.worldW);
+      const dy = wrapDelta(ship.y - cy, this.worldH);
       // On screen already (with a little slack)? No arrow needed.
       if (Math.abs(dx) < vw / 2 + 30 && Math.abs(dy) < vh / 2 + 30) continue;
       const sx = Math.max(pad, Math.min(cw - pad, cw / 2 + dx * scale));
@@ -2097,7 +2137,7 @@ export class MpSession {
       if (i !== this.you && ship.depth > SUB_HIDDEN) return;
       if (ship.sinkProgress < 1) this.drawShipBuffs(ship, i); // aura under the hull
       ship.gunHighlight = this.buffView[i]?.dbl ?? false; // gold guns during double
-      ship.drawWrapped(ctx, WORLD_W, WORLD_H); // ghost across edges = seamless wrap
+      ship.drawWrapped(ctx, this.worldW, this.worldH); // ghost across edges = seamless wrap
       if (ship.sinkProgress < 1) {
         this.drawShipHealth(ship);
         this.drawBuffIcons(ship, i);
@@ -2119,7 +2159,7 @@ export class MpSession {
       const meS = this.ships[this.you];
       if (meS?.alive) {
         const balls = this.isHost ? this.balls : this.ballStates;
-        for (const bearing of incomingThreats(meS, balls, WORLD_W, WORLD_H)) {
+        for (const bearing of incomingThreats(meS, balls, this.worldW, this.worldH)) {
           drawThreatArc(ctx, meS.x, meS.y, meS.length * 0.85, bearing);
         }
       }
@@ -2138,8 +2178,8 @@ export class MpSession {
   private drawWhirlpool() {
     if (this.eyeR >= EYE_MAX) return;
     const ctx = this.ctx;
-    const cx = WORLD_W / 2;
-    const cy = WORLD_H / 2;
+    const cx = this.worldW / 2;
+    const cy = this.worldH / 2;
     const now = performance.now();
 
     ctx.save();
@@ -2148,7 +2188,7 @@ export class MpSession {
     const pulse = 0.2 + 0.06 * Math.sin(now / 500);
     ctx.fillStyle = `rgba(26, 78, 92, ${pulse})`;
     ctx.beginPath();
-    ctx.rect(0, 0, WORLD_W, WORLD_H);
+    ctx.rect(0, 0, this.worldW, this.worldH);
     ctx.arc(cx, cy, this.eyeR, 0, Math.PI * 2, true);
     ctx.fill();
 
