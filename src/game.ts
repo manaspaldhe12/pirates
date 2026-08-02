@@ -3,7 +3,7 @@ import { Cannonball } from './cannonball';
 import { Explosion } from './explosion';
 import type { Input } from './input';
 import { DIVE, gunOffsets, muzzleReach, RAM, SAIL_TYPES, Ship, wrapDelta, YOU_COLOR, type ShipTypeName, type Turn } from './ship';
-import { drawThreatArc, haptic, incomingThreats, requestGameFullscreen, TouchControls, touchCapable, turnToward } from './touchui';
+import { drawThreatArc, haptic, incomingThreats, requestGameFullscreen, TouchControls, touchActive, turnToward } from './touchui';
 import { Wind } from './wind';
 
 const MAX_DT = 0.05;
@@ -73,9 +73,10 @@ export class Game {
   /** While true another renderer (multiplayer) owns the canvas; this loop idles. */
   suspended = false;
 
-  // Not readonly: some WebViews under-report touch capability, so the first
-  // real touch event anywhere upgrades this at runtime.
-  private isTouchDevice = touchCapable();
+  // Actual touch use, not capability — a touchscreen laptop on the keyboard
+  // gets desktop rules. Seeded from any touch earlier this session, upgraded
+  // by the first real touch event after construction.
+  private isTouchDevice = touchActive();
   private touch = new TouchControls();
 
   constructor(ctx: CanvasRenderingContext2D, input: Input) {
