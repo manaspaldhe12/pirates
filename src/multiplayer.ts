@@ -104,10 +104,10 @@ const RESPAWN_BAND = 0.25; // respawn within the central 50% of the map (0.25–
 // Open water required around a respawn point — roughly a second of sailing at
 // small-ship speed, so nobody rematerializes about to beach themselves.
 const RESPAWN_CLEAR = 110;
-// The sea starts pulling in early and squeezes harder for the rest of the
-// match. Once it sets in, sunk bots are out for good — the field thins as the
-// arena shrinks — while human captains keep respawning to the final whistle.
-const STORM_START = 25; // s into a Leaderboard match when the maelstrom forms
+// The storm holds off until the final stretch, then ramps to full by time-up.
+// Once it sets in, sunk bots are out for good — the field thins for the
+// finale — while human captains keep respawning to the final whistle.
+const STORM_WINDOW = 20; // s of maelstrom finale at the end of a Leaderboard match
 
 // Whirlpool (maelstrom): a growing vortex at the arena center that drags every
 // ship inward and shreds anyone caught outside its shrinking eye. Radial, so it
@@ -1447,18 +1447,18 @@ export class MpSession {
 
   /** True once the Leaderboard storm has set in (no more bot respawns). */
   private stormActive(): boolean {
-    return this.mode === 'score' && this.clock >= STORM_START;
+    return this.mode === 'score' && this.clock >= MATCH_DURATION - STORM_WINDOW;
   }
 
   /** Maelstrom strength for the current clock: 0 before it forms → 1 at full.
-   *  Leaderboard starts the squeeze at STORM_START on a square-root curve —
-   *  steep at the onset so the pull is unmistakable within seconds of
-   *  forming, easing toward full fury right as the clock runs out. (A linear
-   *  ramp spent thirty seconds imperceptible.) Survivor keeps its slow build. */
+   *  Leaderboard holds the storm until the last STORM_WINDOW seconds, then
+   *  ramps it to full right as the clock runs out. Survivor keeps its slow
+   *  build. */
   private whirlStrength(): number {
     if (this.mode === 'score') {
-      if (this.clock < STORM_START) return 0;
-      return Math.sqrt(Math.min((this.clock - STORM_START) / (MATCH_DURATION - STORM_START), 1));
+      const start = MATCH_DURATION - STORM_WINDOW;
+      if (this.clock < start) return 0;
+      return Math.min((this.clock - start) / STORM_WINDOW, 1);
     }
     if (this.clock < WHIRL_START) return 0;
     return Math.min((this.clock - WHIRL_START) / WHIRL_RAMP, 1);
@@ -1996,35 +1996,22 @@ export class MpSession {
       ctx.restore();
       this.drawEdgeIndicators(cx, cy, vw, vh, scale, cw, ch);
     } else {
-      // The whole arena scaled to fit, as always on big screens. The world
-      // wraps, so the margins a mismatched aspect leaves over aren't dead
-      // letterbox bars — they show the wrapped continuation of the sea, and
-      // the border stroke marks where the wrap seam actually is.
-      const ox = (cw - WORLD_W * fit) / 2;
-      const oy = (ch - WORLD_H * fit) / 2;
-      ctx.fillStyle = '#2e6da6';
-      ctx.fillRect(0, 0, cw, ch);
+      // Fill the window: scale so the arena covers every pixel, cropping the
+      // small overflow on the mismatched axis evenly on both sides (a 16:9
+      // screen hides ~5% of the world at the top and bottom). The wrap seams
+      // sit exactly on the window edges of the fitted axis, so no border is
+      // drawn — and edge arrows point at any ship sailing a hidden strip.
+      const scale = Math.max(cw / WORLD_W, ch / WORLD_H);
+      const ox = (cw - WORLD_W * scale) / 2; // ≤ 0 — centered crop
+      const oy = (ch - WORLD_H * scale) / 2;
       ctx.save();
       ctx.translate(ox, oy);
-      ctx.scale(fit, fit);
-      // Only one axis can have margins (fit exact-fills the other), so this
-      // draws the world once, plus a wrapped copy per uncovered side.
-      const xs = ox > 0 ? [-WORLD_W, 0, WORLD_W] : [0];
-      const ys = oy > 0 ? [-WORLD_H, 0, WORLD_H] : [0];
-      for (const tx of xs) {
-        for (const ty of ys) {
-          ctx.save();
-          ctx.translate(tx, ty);
-          this.drawWorld(now);
-          ctx.restore();
-        }
-      }
+      ctx.scale(scale, scale);
+      ctx.fillStyle = '#2e6da6';
+      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      this.drawWorld(now);
       ctx.restore();
-
-      // World border so the wrap edge is visible.
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
-      ctx.lineWidth = 2;
-      ctx.strokeRect(ox, oy, WORLD_W * fit, WORLD_H * fit);
+      this.drawEdgeIndicators(WORLD_W / 2, WORLD_H / 2, cw / scale, ch / scale, scale, cw, ch);
     }
 
     this.drawHud();
