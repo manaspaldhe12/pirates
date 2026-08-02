@@ -90,7 +90,9 @@ export type C2HMsg =
 export type H2CMsg =
   | { t: 'reject'; reason: string }
   | { t: 'lobby'; players: LobbyPlayerInfo[]; you: number; mode: MpMode }
-  | { t: 'start'; islands: IslandData[]; ships: ShipSpawn[]; you: number; mode: MpMode }
+  // w/h: arena dimensions for this battle (the host shapes the sea to its own
+  // window; guests mirror so everyone plays the exact same world).
+  | { t: 'start'; islands: IslandData[]; ships: ShipSpawn[]; you: number; mode: MpMode; w: number; h: number }
   // Mid-battle roster growth: a captain joined late; existing clients extend
   // their ship lists in place (indices never shrink or reorder mid-round).
   | { t: 'roster'; ships: ShipSpawn[] }
