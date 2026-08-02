@@ -59,7 +59,8 @@ const MAG_RELOAD = 2; // s to reload and refill
 
 // ── Power-ups ─────────────────────────────────────────────────────────────────
 const MG_RELOAD = 0.16; // machine-gun cadence
-const MG_DURATION = 5; // s of continuous fire
+const MG_DURATION = 5; // s the rapid-fire window stays open
+const MG_BURST = 0.5; // s a single press keeps the stream firing (~3 shots)
 const DOUBLE_DURATION = 10; // s of firing both sides at once (barrels show on both)
 const SPEED_DURATION = 8; // s of double speed
 const SPEED_MULT = 2;
@@ -254,6 +255,7 @@ interface Buff {
   speedUntil: number;
   mgUntil: number;
   mgArmed: boolean; // machine gun picked up, waiting for the next trigger shot
+  mgStream: number; // rapid fire keeps streaming until this clock (refreshed per press)
 }
 
 /** What guests need to render a ship's power-up state. */
@@ -799,7 +801,7 @@ export class MpSession {
     };
     this.spawns.push(spawn);
     this.ships.push(new Ship(spawn.x, spawn.y, spawn.heading, spawn.color, spawn.type));
-    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false });
+    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false, mgStream: 0 });
     this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
     this.scores.push({ time: 0, damage: 0, kills: 0 });
     this.scoreView.push({ score: 0, kills: 0 });
@@ -893,6 +895,7 @@ export class MpSession {
       speedUntil: 0,
       mgUntil: 0,
       mgArmed: false,
+      mgStream: 0,
     }));
     this.buffView = this.spawns.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
     this.scores = this.spawns.map(() => ({ time: 0, damage: 0, kills: 0 }));
@@ -1044,11 +1047,15 @@ export class MpSession {
         const sub = ship.type === 'submarine';
         if (ship.depth > 0.15 && !sub) return; // only subs can shoot from underwater
 
-        // Rapid Fire: a continuous stream *while the trigger is held*, bypassing
-        // the magazine. Letting go stops it — the buff buys you 5 s of cadence,
-        // not 5 s of shooting on its own.
+        // Rapid Fire: for its 5 s window every press unleashes a machine-gun
+        // burst, and back-to-back presses (or a held trigger on desktop) fuse
+        // into a continuous stream. Touch fire is a one-frame pulse per tap —
+        // no way to "hold" when a resting finger means steering — so the
+        // burst tail is what makes the pickup work under thumbs. Nothing
+        // fires without a press, so the gun never runs unattended.
         if (b.mgUntil > this.clock) {
-          if (this.players[i].fire && ship.reload <= 0) {
+          if (this.players[i].fire) b.mgStream = this.clock + MG_BURST;
+          if (b.mgStream > this.clock && ship.reload <= 0) {
             if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
             else this.fireSide(ship, 1, MG_RELOAD);
             this.pendingEvents.push({ e: 'fire', by: i });
@@ -1076,11 +1083,13 @@ export class MpSession {
           this.reloadT[i] = MAG_RELOAD;
         }
 
-        // A freshly grabbed Rapid Fire arms on the next press and bypasses ammo.
+        // A freshly grabbed Rapid Fire arms on the next press and bypasses
+        // ammo; the arming press flows straight into its first burst.
         if (b.mgArmed) {
           if (!triggered) return;
           b.mgArmed = false;
           b.mgUntil = this.clock + MG_DURATION;
+          b.mgStream = this.clock + MG_BURST;
           if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
           else this.fireSide(ship, 1, MG_RELOAD);
           this.pendingEvents.push({ e: 'fire', by: i });
@@ -1375,7 +1384,7 @@ export class MpSession {
     ship.gunHighlight = false;
     ship.wake = [];
     // A respawn is a clean slate — old power-ups don't carry over.
-    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false };
+    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false, mgStream: 0 };
     this.diveCharge[i] = DIVE_MAX;
     this.mag[i] = this.magCap[i]; // fresh magazine, nothing reloading
     this.reloadT[i] = 0;
@@ -1442,12 +1451,14 @@ export class MpSession {
   }
 
   /** Maelstrom strength for the current clock: 0 before it forms → 1 at full.
-   *  Leaderboard starts the squeeze at STORM_START and tightens steadily until
-   *  the clock runs out. Survivor keeps its own slow build. */
+   *  Leaderboard starts the squeeze at STORM_START on a square-root curve —
+   *  steep at the onset so the pull is unmistakable within seconds of
+   *  forming, easing toward full fury right as the clock runs out. (A linear
+   *  ramp spent thirty seconds imperceptible.) Survivor keeps its slow build. */
   private whirlStrength(): number {
     if (this.mode === 'score') {
       if (this.clock < STORM_START) return 0;
-      return Math.min((this.clock - STORM_START) / (MATCH_DURATION - STORM_START), 1);
+      return Math.sqrt(Math.min((this.clock - STORM_START) / (MATCH_DURATION - STORM_START), 1));
     }
     if (this.clock < WHIRL_START) return 0;
     return Math.min((this.clock - WHIRL_START) / WHIRL_RAMP, 1);
