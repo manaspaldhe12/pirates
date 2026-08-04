@@ -66,8 +66,7 @@ const MAG_RELOAD = 2; // s to reload and refill
 
 // ── Power-ups ─────────────────────────────────────────────────────────────────
 const MG_RELOAD = 0.16; // machine-gun cadence
-const MG_DURATION = 5; // s the rapid-fire window stays open
-const MG_BURST = 0.5; // s a single press keeps the stream firing (~3 shots)
+const MG_DURATION = 5; // s of continuous fire
 const DOUBLE_DURATION = 10; // s of firing both sides at once (barrels show on both)
 const SPEED_DURATION = 8; // s of double speed
 const SPEED_MULT = 2;
@@ -264,7 +263,6 @@ interface Buff {
   speedUntil: number;
   mgUntil: number;
   mgArmed: boolean; // machine gun picked up, waiting for the next trigger shot
-  mgStream: number; // rapid fire keeps streaming until this clock (refreshed per press)
 }
 
 /** What guests need to render a ship's power-up state. */
@@ -814,7 +812,7 @@ export class MpSession {
     };
     this.spawns.push(spawn);
     this.ships.push(new Ship(spawn.x, spawn.y, spawn.heading, spawn.color, spawn.type));
-    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false, mgStream: 0 });
+    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false });
     this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
     this.scores.push({ time: 0, damage: 0, kills: 0 });
     this.scoreView.push({ score: 0, kills: 0 });
@@ -918,7 +916,6 @@ export class MpSession {
       speedUntil: 0,
       mgUntil: 0,
       mgArmed: false,
-      mgStream: 0,
     }));
     this.buffView = this.spawns.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
     this.scores = this.spawns.map(() => ({ time: 0, damage: 0, kills: 0 }));
@@ -1072,15 +1069,11 @@ export class MpSession {
         const sub = ship.type === 'submarine';
         if (ship.depth > 0.15 && !sub) return; // only subs can shoot from underwater
 
-        // Rapid Fire: for its 5 s window every press unleashes a machine-gun
-        // burst, and back-to-back presses (or a held trigger on desktop) fuse
-        // into a continuous stream. Touch fire is a one-frame pulse per tap —
-        // no way to "hold" when a resting finger means steering — so the
-        // burst tail is what makes the pickup work under thumbs. Nothing
-        // fires without a press, so the gun never runs unattended.
+        // Rapid Fire: once the arming shot fires, 5 s of continuous automatic
+        // fire — humans and bots alike. Deliberately hands-free: the pickup
+        // is armed by a trigger press, so the stream is always player-initiated.
         if (b.mgUntil > this.clock) {
-          if (this.players[i].fire) b.mgStream = this.clock + MG_BURST;
-          if (b.mgStream > this.clock && ship.reload <= 0) {
+          if (ship.reload <= 0) {
             if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
             else this.fireSide(ship, 1, MG_RELOAD);
             this.pendingEvents.push({ e: 'fire', by: i });
@@ -1108,13 +1101,11 @@ export class MpSession {
           this.reloadT[i] = MAG_RELOAD;
         }
 
-        // A freshly grabbed Rapid Fire arms on the next press and bypasses
-        // ammo; the arming press flows straight into its first burst.
+        // A freshly grabbed Rapid Fire arms on the next press and bypasses ammo.
         if (b.mgArmed) {
           if (!triggered) return;
           b.mgArmed = false;
           b.mgUntil = this.clock + MG_DURATION;
-          b.mgStream = this.clock + MG_BURST;
           if (sub) this.fireTorpedo(ship, MG_RELOAD_SUB, 0);
           else this.fireSide(ship, 1, MG_RELOAD);
           this.pendingEvents.push({ e: 'fire', by: i });
@@ -1409,7 +1400,7 @@ export class MpSession {
     ship.gunHighlight = false;
     ship.wake = [];
     // A respawn is a clean slate — old power-ups don't carry over.
-    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false, mgStream: 0 };
+    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false };
     this.diveCharge[i] = DIVE_MAX;
     this.mag[i] = this.magCap[i]; // fresh magazine, nothing reloading
     this.reloadT[i] = 0;
