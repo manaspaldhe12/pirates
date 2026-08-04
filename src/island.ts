@@ -53,29 +53,31 @@ function makeShape(kind: IslandShape, worldW: number, worldH: number): IslandCir
     return circles;
   }
 
-  // Elongated shapes: walk a path, dropping overlapping circles. The radius
-  // swells amidships and tapers to the tips, so the coastline reads as one
-  // long island rather than a row of beads.
-  const steps = 4 + Math.floor(Math.random() * 3); // 4–6 circles
-  const base = 24 + Math.random() * 10; // amidships radius
+  // Elongated shapes: walk a long path, dropping overlapping circles. The
+  // radius swells gently amidships and tapers to the tips, but stays small
+  // throughout — a thin bar of sand several ship-lengths long, unmistakably
+  // different from a cay.
+  const steps = 7 + Math.floor(Math.random() * 4); // 7–10 circles
+  const base = 19 + Math.random() * 7; // amidships radius — thin, not plump
   let heading = Math.random() * Math.PI * 2;
   // ridge: dead straight (a grain of jitter); arc: steady bend either way;
-  // hook: the bend itself grows each step, curling the tail in.
-  let bend = kind === 'ridge' ? 0 : (Math.random() < 0.5 ? -1 : 1) * (0.22 + Math.random() * 0.18);
-  const bendGrow = kind === 'hook' ? 1.45 : 1;
+  // hook: the bend itself grows each step, curling the tail in (capped so a
+  // long tail curls rather than knots).
+  let bend = kind === 'ridge' ? 0 : (Math.random() < 0.5 ? -1 : 1) * (0.1 + Math.random() * 0.12);
+  const bendGrow = kind === 'hook' ? 1.35 : 1;
 
   const circles: IslandCircle[] = [];
   let px = x;
   let py = y;
   for (let i = 0; i < steps; i++) {
-    const taper = 0.55 + 0.45 * Math.sin((Math.PI * i) / (steps - 1)); // thin→fat→thin
+    const taper = 0.6 + 0.4 * Math.sin((Math.PI * i) / (steps - 1)); // thin→fat→thin
     const r = base * taper;
     circles.push({ x: px, y: py, r });
-    const next = base * (0.55 + 0.45 * Math.sin((Math.PI * (i + 1)) / (steps - 1)));
-    px += Math.cos(heading) * (r + next) * 0.62;
-    py += Math.sin(heading) * (r + next) * 0.62;
-    heading += bend + (Math.random() - 0.5) * 0.12;
-    bend *= bendGrow;
+    const next = base * (0.6 + 0.4 * Math.sin((Math.PI * (i + 1)) / (steps - 1)));
+    px += Math.cos(heading) * (r + next) * 0.7;
+    py += Math.sin(heading) * (r + next) * 0.7;
+    heading += bend + (Math.random() - 0.5) * 0.1;
+    bend = Math.sign(bend) * Math.min(Math.abs(bend) * bendGrow, 0.45);
   }
   return circles;
 }
@@ -87,9 +89,10 @@ export function generateIslands(
 ): IslandData[] {
   const islands: IslandData[] = [];
   // A different hand every battle: 4–6 islands, shuffled shapes, and always
-  // at least one elongated island in the mix.
+  // at least two elongated islands (a straight ridge plus a curved one) so
+  // the long thin bars are a fixture of every map, not a lucky draw.
   const target = 4 + Math.floor(Math.random() * 3);
-  const deck: IslandShape[] = ['ridge', 'blob'];
+  const deck: IslandShape[] = ['ridge', Math.random() < 0.5 ? 'arc' : 'hook', 'blob'];
   while (deck.length < target) deck.push(SHAPES[Math.floor(Math.random() * SHAPES.length)]);
   for (let i = deck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -97,7 +100,7 @@ export function generateIslands(
   }
 
   let attempts = 0;
-  while (islands.length < target && attempts < 600) {
+  while (islands.length < target && attempts < 900) {
     attempts++;
     const circles = makeShape(deck[islands.length], worldW, worldH);
     if (!fits(circles, islands, spawns, worldW, worldH)) continue;
