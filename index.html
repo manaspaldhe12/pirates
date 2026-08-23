@@ -117,7 +117,8 @@
 
           <h2>🏆 Scoring &amp; Battle Modes</h2>
           <p>
-            The host picks the win condition in the lobby.
+            You pick the win condition up front in Bots Arena; with friends, the host
+            picks it in the lobby.
             <b>Leaderboard</b>: a <b>90-second deathmatch</b> — when you sink you
             <b>respawn in the middle of the map</b> after a short pause (with a fresh spawn
             shield), so sink as many as you can before the clock runs out. Bounties are
@@ -134,7 +135,10 @@
 
           <h2>🤖 Multiplayer &amp; Bots</h2>
           <p>
-            Create a room and share the 5-letter code — or tap <b>🔗 Copy invite link</b>
+            <b>Bots Arena</b> on the opening screen drops you straight into a free-for-all
+            against 5, 10 or 15 bots — no room, no waiting. For real crew, pick
+            <b>Play with Friends</b>, create a room and share the 5-letter code — or tap
+            <b>🔗 Copy invite link</b>
             and friends just click it to join. <b>Friends can even join mid-battle</b> —
             they drop in like a respawn, spawn shield and all. <b>Human captains sail bright colored
             hulls</b> (yellow, blue, orange, …) while <b>bots are grey</b>, so the real
@@ -156,51 +160,78 @@
       <div id="lb-body" class="hidden"></div>
     </div>
 
-    <!-- Full-screen selection modal shown before the battle starts -->
+    <!-- Full-screen muster shown before the battle starts. One question per
+         step; main.ts drives which panel is visible. -->
     <div id="menu-overlay">
       <div class="modal">
+        <!-- Back / breadcrumbs / step counter — hidden on the title screen -->
+        <div id="wizard-bar" class="wizard-bar hidden">
+          <button id="wiz-back" type="button" class="wiz-back">← Back</button>
+          <div id="wiz-crumbs" class="crumbs"></div>
+          <span id="wiz-count" class="step-count"></span>
+        </div>
+
         <div class="modal-scroll">
-          <h1>Pirates: Naval Combat</h1>
+          <h1 id="menu-title">Pirates: Naval Combat</h1>
 
-          <div class="section-label">Game mode</div>
-          <div class="card-row" id="mode-cards"></div>
-
-          <div id="practice-section">
-            <div class="section-label">Practice mode</div>
-            <div class="card-row" id="practice-cards"></div>
+          <div class="step" id="step-root">
+            <div class="section-label">Choose your battle</div>
+            <div class="card-row stacked" id="root-cards"></div>
+            <button id="quick-battle" type="button" class="quick-battle hidden"></button>
           </div>
 
-          <div id="player-section">
+          <div class="step hidden" id="step-ptype">
+            <div class="section-label">Battle type</div>
+            <div class="card-row" id="ptype-cards"></div>
+          </div>
+
+          <!-- Shared by Practice and Bots Arena — only one path is live at a time -->
+          <div class="step hidden" id="step-ship">
             <div class="section-label">Your ship</div>
-            <div class="card-row" id="player-cards"></div>
+            <div class="card-row" id="ship-cards"></div>
           </div>
 
-          <div id="enemy-section">
+          <div class="step hidden" id="step-enemy">
             <div class="section-label">Enemy ship</div>
             <div class="card-row" id="enemy-cards"></div>
           </div>
 
-          <div id="difficulty-section">
+          <div class="step hidden" id="step-difficulty">
             <div class="section-label">Difficulty</div>
             <div class="card-row" id="difficulty-cards"></div>
           </div>
 
-          <!-- Online multiplayer setup: create a room or join with a code -->
-          <div id="mp-section" class="hidden">
-            <div class="section-label">Captain name</div>
-            <input id="mp-name" class="mp-input" maxlength="16" placeholder="Captain" autocomplete="off" />
-            <div class="mp-actions">
-              <button id="mp-create" class="mp-btn">Create Room</button>
-              <span class="mp-or">— or —</span>
-              <input id="mp-code" class="mp-input mp-code" maxlength="5" placeholder="CODE" autocomplete="off" />
-              <button id="mp-join" class="mp-btn">Join</button>
-            </div>
-            <div id="mp-status" class="mp-status"></div>
+          <div class="step hidden" id="step-bmode">
+            <div class="section-label">Battle mode</div>
+            <div class="card-row" id="bmode-cards"></div>
           </div>
+
+          <div class="step hidden" id="step-bcount">
+            <div class="section-label">How many bots</div>
+            <div class="card-row" id="bcount-cards"></div>
+          </div>
+
+          <div class="step hidden" id="step-fhow">
+            <div class="section-label">Create or join</div>
+            <div class="card-row stacked" id="fhow-cards"></div>
+          </div>
+
+          <!-- Name (+ code when joining) for online play -->
+          <div class="step hidden" id="step-fname">
+            <div class="section-label">Your ship's name</div>
+            <input id="mp-name" class="mp-input" maxlength="16" placeholder="Sea Wolf" autocomplete="off" />
+            <div id="code-field" class="hidden">
+              <div class="section-label">Room code</div>
+              <input id="mp-code" class="mp-input mp-code" maxlength="5" placeholder="CODE" autocomplete="off" />
+            </div>
+          </div>
+
+          <!-- Outside the steps so a connection error is readable on any of them -->
+          <div id="mp-status" class="mp-status"></div>
         </div>
 
         <div class="modal-footer">
-          <button id="set-sail">⚓ Set Sail</button>
+          <button id="set-sail" class="hidden">⚓ Set Sail</button>
           <div class="hint">← → / A D to steer &nbsp;·&nbsp; Space to fire &nbsp;·&nbsp; R to reload &nbsp;·&nbsp; Touch: hold to steer, tap to fire, double-tap to dive &nbsp;·&nbsp; ❓ for rules</div>
         </div>
       </div>
@@ -219,7 +250,7 @@
           <div class="section-label">Battle mode — host picks</div>
           <div class="card-row" id="lobby-mode-cards"></div>
 
-          <div class="section-label">Captains</div>
+          <div class="section-label">Ships</div>
           <div id="lobby-players" class="lobby-players"></div>
 
           <div class="section-label">Your ship</div>

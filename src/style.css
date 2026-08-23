@@ -66,6 +66,11 @@ canvas {
   .mp-input {
     min-height: 46px;
   }
+  /* Breadcrumbs are shortcuts, not the primary control — ← Back keeps the
+     thumb-sized target, so full-height pills would just eat the screen. */
+  .modal .crumb {
+    min-height: 32px;
+  }
 }
 
 /* Phones: menu and lobby become full-width scrollable sheets instead of a
@@ -147,6 +152,31 @@ canvas {
   flex-wrap: wrap;
 }
 
+/* The title screen's three ways to play (and Create/Join): full-width rows with
+   a glyph, so the first choice reads as a menu rather than a row of chips. */
+.card-row.stacked {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 420px;
+  margin: 0 auto;
+}
+
+.card-row.stacked .card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-align: left;
+  padding: 13px 16px;
+}
+
+.card-glyph {
+  font-size: 24px;
+  line-height: 1;
+  width: 28px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
 .card {
   background: rgba(255, 255, 255, 0.07);
   border: 2px solid rgba(255, 255, 255, 0.18);
@@ -183,6 +213,117 @@ canvas {
 .card .card-stat {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Muster wizard chrome ─────────────────────────────────────────────────── */
+
+.wizard-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(4, 15, 26, 0.5);
+  flex-shrink: 0;
+}
+
+/* Phones show the menu as a full-bleed sheet, so the bar starts at the very
+   top-left — where the floating mute and help buttons already sit. */
+@media (max-width: 700px) {
+  .wizard-bar {
+    padding-left: 60px;
+  }
+}
+
+.wiz-back {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  padding: 6px 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.wiz-back:active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+/* Answers already given — each one jumps back to that question. */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.crumb {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  background: rgba(200, 134, 10, 0.16);
+  border: 1px solid rgba(200, 134, 10, 0.45);
+  color: #f0c477;
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.crumb:active {
+  background: rgba(200, 134, 10, 0.3);
+}
+
+.step-count {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.4);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.step {
+  animation: step-in 0.16s ease-out;
+}
+
+@keyframes step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step {
+    animation: none;
+  }
+}
+
+/* One tap back to the last practice setup — the wizard's only cost is taps. */
+.quick-battle {
+  margin-top: 18px;
+  font-family: inherit;
+  font-size: 12.5px;
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  padding: 6px 10px;
+}
+
+.quick-battle:active {
+  color: #fff;
 }
 
 #set-sail {
@@ -455,20 +596,6 @@ canvas {
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-weight: 700;
-}
-
-.mp-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.mp-or {
-  color: rgba(255, 255, 255, 0.4);
-  font-size: 12px;
 }
 
 .mp-btn {
