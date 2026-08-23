@@ -10,6 +10,11 @@
     <meta http-equiv="Cache-Control" content="no-cache, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>Pirates: Naval Combat</title>
+    <!-- Display face for the big titles only — body copy stays on the system
+         stack so the UI never waits on a font to be readable. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Pirata+One&display=swap" rel="stylesheet" />
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-6PX28XX4W9"></script>
     <script>
@@ -232,7 +237,7 @@
 
         <div class="modal-footer">
           <button id="set-sail" class="hidden">⚓ Set Sail</button>
-          <div class="hint">← → / A D to steer &nbsp;·&nbsp; Space to fire &nbsp;·&nbsp; R to reload &nbsp;·&nbsp; Touch: hold to steer, tap to fire, double-tap to dive &nbsp;·&nbsp; ❓ for rules</div>
+          <div class="hint" id="menu-hint">← → / A D to steer &nbsp;·&nbsp; Space to fire &nbsp;·&nbsp; R to reload &nbsp;·&nbsp; Touch: hold to steer, tap to fire, double-tap to dive &nbsp;·&nbsp; ❓ for rules</div>
         </div>
       </div>
     </div>
@@ -243,9 +248,12 @@
         <div class="modal-scroll">
           <h1>Ship's Muster</h1>
 
-          <div class="section-label" id="room-code-label">Room code — share it with your crew</div>
-          <div id="room-code" class="room-code"></div>
-          <button id="copy-link" class="mp-btn copy-link hidden">🔗 Copy invite link</button>
+          <!-- Hidden for a Bots Arena fleet: there's no room for anyone to join -->
+          <div id="room-code-block">
+            <div class="section-label" id="room-code-label">Room code — share it with your crew</div>
+            <div id="room-code" class="room-code"></div>
+            <button id="copy-link" class="mp-btn copy-link hidden">🔗 Copy invite link</button>
+          </div>
 
           <div class="section-label">Battle mode — host picks</div>
           <div class="card-row" id="lobby-mode-cards"></div>

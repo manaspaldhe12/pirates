@@ -94,7 +94,9 @@ let survivorKills = 0;
 
 // ── Remembered setup ──────────────────────────────────────────────────────────
 // The muster asks one question per screen, so a returning captain would retype
-// the same answers every visit. Persist them and pre-select the cards instead.
+// the same answers every visit. Persist them so Quick Battle can replay the
+// last setup in one tap. The cards themselves never come back highlighted —
+// see renderMenu().
 
 const SETUP_KEY = 'pirates-setup';
 const BOT_COUNTS = [5, 10, 15];
@@ -243,10 +245,14 @@ const wizCrumbs = document.getElementById('wiz-crumbs')!;
 const wizCount = document.getElementById('wiz-count')!;
 const menuTitle = document.getElementById('menu-title')!;
 const codeField = document.getElementById('code-field')!;
+const menuHint = document.getElementById('menu-hint')!;
+const CONTROLS_HINT = menuHint.textContent ?? '';
 
 /** -1 is the title screen; otherwise an index into activeSteps(). */
 let stepIndex = -1;
 let footerAction: (() => void) | null = null;
+/** Which panel was on screen last render — a change means we just navigated. */
+let shownPanel = '';
 
 function activeSteps(): Step[] {
   if (!selectedPath) return [];
@@ -264,6 +270,14 @@ function renderMenu() {
   stepPanels.forEach((panel, id) => panel.classList.toggle('hidden', id !== active));
   menuTitle.classList.toggle('hidden', !atRoot);
   if (atRoot) updateQuickBattle();
+
+  // Arriving at a step, nothing is highlighted — a card left looking "chosen"
+  // reads as done, and you can't tell that tapping it is what moves you on.
+  const panel = stepPanels.get(active)!;
+  if (active !== shownPanel) {
+    panel.querySelectorAll('.card.selected').forEach((c) => c.classList.remove('selected'));
+    shownPanel = active;
+  }
   wizardBar.classList.toggle('hidden', atRoot);
   wizCount.textContent = atRoot ? '' : `Step ${stepIndex + 1} of ${steps.length}`;
   if (active === 'fname') codeField.classList.toggle('hidden', selectedRoom !== 'join');
@@ -281,6 +295,11 @@ function renderMenu() {
   footerAction = action?.run ?? null;
   setSailBtn.classList.toggle('hidden', !action);
   if (action) setSailBtn.textContent = action.label;
+
+  // The last step's cards gate its button: pick one, then launch.
+  const needsPick = !!panel.querySelector('.card') && !panel.querySelector('.card.selected');
+  setSailBtn.disabled = !!action && needsPick;
+  menuHint.textContent = action && needsPick ? 'Pick one above to set sail' : CONTROLS_HINT;
 }
 
 function makeCrumb(text: string, onClick: () => void): HTMLButtonElement {
@@ -363,7 +382,6 @@ practiceOptions.forEach(({ key, label, stat }) => {
   card.addEventListener('click', () => answer(ptypeRow, key, () => (selectedPractice = key)));
   ptypeRow.appendChild(card);
 });
-selectCard(ptypeRow, selectedPractice);
 
 /** Card stat line for a hull (submarine gets its own blurb). */
 function shipStat(type: ShipTypeName): string {
@@ -380,7 +398,6 @@ const shipRow = document.getElementById('ship-cards')!;
   card.addEventListener('click', () => answer(shipRow, type, () => (selectedShip = type)));
   shipRow.appendChild(card);
 });
-selectCard(shipRow, selectedShip);
 
 // Enemy ship cards (includes Random; the enemy AI stays on sailing hulls)
 const enemyRow = document.getElementById('enemy-cards')!;
@@ -392,7 +409,6 @@ SAIL_TYPES.forEach((type) => {
 const randomCard = makeCard('Random', 'any of the three', 'random');
 randomCard.addEventListener('click', () => answer(enemyRow, 'random', () => (selectedEnemy = 'random')));
 enemyRow.appendChild(randomCard);
-selectCard(enemyRow, selectedEnemy);
 
 // Difficulty cards
 const diffRow = document.getElementById('difficulty-cards')!;
@@ -406,7 +422,6 @@ const diffRow = document.getElementById('difficulty-cards')!;
   card.addEventListener('click', () => answer(diffRow, name, () => (selectedDifficulty = name)));
   diffRow.appendChild(card);
 });
-selectCard(diffRow, selectedDifficulty);
 
 // ── Bots Arena cards ──────────────────────────────────────────────────────────
 
@@ -422,7 +437,6 @@ mpModeOptions.forEach(({ key, label, stat }) => {
   card.addEventListener('click', () => answer(bmodeRow, key, () => (selectedArenaMode = key)));
   bmodeRow.appendChild(card);
 });
-selectCard(bmodeRow, selectedArenaMode);
 
 const bcountRow = document.getElementById('bcount-cards')!;
 const botBlurbs = ['a quick skirmish', 'a proper brawl', 'full armada chaos'];
@@ -431,7 +445,6 @@ BOT_COUNTS.forEach((n, i) => {
   card.addEventListener('click', () => answer(bcountRow, String(n), () => (selectedBots = n)));
   bcountRow.appendChild(card);
 });
-selectCard(bcountRow, String(selectedBots));
 
 // ── Play with Friends cards ───────────────────────────────────────────────────
 
@@ -445,7 +458,6 @@ roomOptions.forEach(({ key, glyph, label, stat }) => {
   card.addEventListener('click', () => answer(fhowRow, key, () => (selectedRoom = key)));
   fhowRow.appendChild(card);
 });
-selectCard(fhowRow, selectedRoom);
 
 // ── Overlay refs ──────────────────────────────────────────────────────────────
 
@@ -564,6 +576,7 @@ const mpStatus = document.getElementById('mp-status')!;
 const lobbyOverlay = document.getElementById('lobby-overlay')!;
 const roomCodeEl = document.getElementById('room-code')!;
 const roomCodeLabel = document.getElementById('room-code-label')!;
+const roomCodeBlock = document.getElementById('room-code-block')!;
 const copyLinkBtn = document.getElementById('copy-link') as HTMLButtonElement;
 let currentRoomCode = '';
 const lobbyPlayersEl = document.getElementById('lobby-players')!;
@@ -610,6 +623,9 @@ mpModeOptions.forEach(({ key, label, stat }) => {
 });
 
 function renderLobby(players: LobbyPlayerInfo[], you: number, canStart: boolean, mode: MpMode) {
+  // A Bots Arena fleet has no room anyone can join, so there's no code to show
+  // — and a permanent "connecting…" would just look broken.
+  roomCodeBlock.classList.toggle('hidden', arenaBots !== null);
   selectCard(lobbyModeRow, mode);
   lobbyPlayersEl.innerHTML = '';
   players.forEach((p, i) => {
@@ -627,7 +643,7 @@ function renderLobby(players: LobbyPlayerInfo[], you: number, canStart: boolean,
 
     const ship = document.createElement('span');
     ship.className = 'pship';
-    ship.textContent = p.ship;
+    ship.textContent = `${p.ship === 'submarine' ? '🤿' : '⛵'} ${p.ship}`;
 
     const ready = document.createElement('span');
     ready.className = 'pready' + (p.ready ? ' is-ready' : '');
@@ -767,8 +783,8 @@ function mpCallbacks() {
       const isHost = mp?.isHost ?? false;
       btnRematch.classList.toggle('hidden', !isHost);
       // In an arena the lobby is a screen the player never saw — it's where you
-      // go to change the mode or the bot count, so name it that.
-      btnToLobby.textContent = arenaBots !== null ? 'Change Fleet' : 'Back to Lobby';
+      // go to pick a different hull, so name it that.
+      btnToLobby.textContent = arenaBots !== null ? 'Change Ship' : 'Back to Lobby';
       btnToLobby.classList.toggle('hidden', !isHost);
       mpendWait.classList.toggle('hidden', isHost);
       mpendOverlay.classList.remove('hidden');
@@ -777,6 +793,11 @@ function mpCallbacks() {
       mpendOverlay.classList.add('hidden');
       game.suspended = false;
       lobbyOverlay.classList.remove('hidden');
+      // "Change Ship" promises the hull picker, so put it on screen rather than
+      // leaving it below a long roster.
+      if (arenaBots !== null) {
+        lobbyShipRow.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
     },
     onError(message: string) {
       endMpSession(message);
