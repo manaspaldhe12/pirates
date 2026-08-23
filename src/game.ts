@@ -290,11 +290,10 @@ export class Game {
       // fire back-to-back with no enforced gap.
       const firePressed = this.input.wasPressed('Space') || touchFire;
 
-      // R begins a reload; on touch (no R key), a fire tap while empty does too.
-      // Only useful when the magazine isn't already full or reloading.
-      const wantReload =
-        this.input.wasPressed('KeyR') ||
-        (this.isTouchDevice && firePressed && this.ammo < this.player.guns);
+      // Running dry starts the reload on its own — the same MAG_RELOAD wait,
+      // just without having to ask for it. R still tops up early at any time,
+      // which costs the full reload for whatever's left in the magazine.
+      const wantReload = this.input.wasPressed('KeyR') || this.ammo < this.player.guns;
       if (this.reloadTimer === 0 && this.ammo < this.ammoCap && wantReload) {
         this.reloadTimer = MAG_RELOAD;
       }
@@ -499,14 +498,6 @@ export class Game {
       }
     }
 
-    // Prompt to reload once the magazine can't field a full broadside.
-    if (this.reloadTimer === 0 && this.ammo < p.guns) {
-      ctx.font = 'bold 12px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#ffd75e';
-      ctx.fillText('Press R to reload', p.x, y + pipH + 4);
-    }
   }
 
   private drawSea() {

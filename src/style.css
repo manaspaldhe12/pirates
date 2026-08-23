@@ -897,6 +897,9 @@ canvas {
 }
 
 #mpend-board {
+  /* Standings are a table of names and numbers — same system stack as the
+     in-battle leaderboard, which is the face this list has always used. */
+  font-family: system-ui, sans-serif;
   margin: 0 auto 26px;
   width: min(420px, calc(100vw - 48px));
   max-height: 46svh;
@@ -910,6 +913,20 @@ canvas {
 #mpend-board .lb-row {
   font-size: 15px;
   padding: 6px 6px;
+}
+
+/* A plain ranking: one colour for every captain but you, and no fading for
+   ships that happened to be sunk when the clock ran out. */
+#mpend-board .lb-row.dead {
+  opacity: 1;
+}
+
+#mpend-board .lb-dot {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+#mpend-board .lb-row.you .lb-dot {
+  background: #ff5fae;
 }
 
 /* Final standings: your whole row in the ship pink (reads well on the dark

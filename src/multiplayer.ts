@@ -1089,13 +1089,11 @@ export class MpSession {
         const triggered = bot ? held && ship.reload <= 0 : held && !this.firePrev[i];
         this.firePrev[i] = held;
 
-        // Reload: bots the moment they can't field a full volley; humans on R.
-        // Touch captains have no R key, so for them (and only them) a fire tap
-        // on a dry magazine stands in for it. A pending arming shot is exempt.
+        // Reload: everyone the moment they can't field a full volley — humans
+        // no longer have to ask. R still tops up early at any time, for the
+        // same wait. A pending arming shot is exempt.
         const cantVolley = this.mag[i] < ship.guns;
-        const wantReload = bot
-          ? cantVolley
-          : this.players[i].reload || (this.players[i].touch && triggered && cantVolley);
+        const wantReload = cantVolley || (!bot && this.players[i].reload);
         this.players[i].reload = false; // consume the latched R request
         if (this.reloadT[i] === 0 && this.mag[i] < this.magCap[i] && wantReload && !b.mgArmed) {
           this.reloadT[i] = MAG_RELOAD;
@@ -2413,13 +2411,6 @@ export class MpSession {
         ctx.fillStyle = k < ammo ? '#ffd75e' : 'rgba(255, 255, 255, 0.18)';
         ctx.fillRect(x0 + k * (pipW + gap), y, pipW, pipH);
       }
-    }
-    if (rl === 0 && ammo < ship.guns) {
-      ctx.font = 'bold 11px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = '#ffd75e';
-      ctx.fillText('Press R to reload', ship.x, y + pipH + 3);
     }
     ctx.restore();
   }

@@ -708,7 +708,7 @@ function mpCallbacks() {
         : 'Mutual destruction — a draw!';
       // Final standings on the end screen.
       const board = mp?.getLeaderboard() ?? [];
-      mpendBoard.replaceChildren(...board.map((e, i) => renderLbRow(e, i + 1)));
+      mpendBoard.replaceChildren(...board.map((e, i) => renderLbRow(e, i + 1, true)));
       const isHost = mp?.isHost ?? false;
       btnRematch.classList.toggle('hidden', !isHost);
       // In an arena the lobby is a screen the player never saw — it's where you
@@ -862,9 +862,13 @@ lbToggle.addEventListener('click', () => {
   updateLeaderboard();
 });
 
-function renderLbRow(e: LeaderboardEntry, rank: number): HTMLElement {
+/** `uniform` is the end-of-battle board: a final ranking, where being afloat
+ *  at the last tick is not a distinction worth colouring. Crew colours, the
+ *  dead fade and the ☠ all belong to the live board, which you read mid-fight
+ *  to tell ships apart. */
+function renderLbRow(e: LeaderboardEntry, rank: number, uniform = false): HTMLElement {
   const row = document.createElement('div');
-  row.className = 'lb-row' + (e.you ? ' you' : '') + (e.alive ? '' : ' dead');
+  row.className = 'lb-row' + (e.you ? ' you' : '') + (e.alive || uniform ? '' : ' dead');
 
   const rankEl = document.createElement('span');
   rankEl.className = 'lb-rank';
@@ -872,11 +876,11 @@ function renderLbRow(e: LeaderboardEntry, rank: number): HTMLElement {
 
   const dot = document.createElement('span');
   dot.className = 'lb-dot';
-  dot.style.background = e.color;
+  if (!uniform) dot.style.background = e.color;
 
   const name = document.createElement('span');
   name.className = 'lb-name';
-  name.textContent = e.name + (e.you ? ' (you)' : '') + (e.alive ? '' : ' ☠');
+  name.textContent = e.name + (e.you ? ' (you)' : '') + (e.alive || uniform ? '' : ' ☠');
 
   const kills = document.createElement('span');
   kills.className = 'lb-kills';
