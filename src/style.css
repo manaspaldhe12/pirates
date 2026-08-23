@@ -51,8 +51,14 @@ canvas {
   background: rgba(0, 0, 0, 0.6);
 }
 
+/* The muster is a place, not a dialog — give it the same harbour backdrop as
+   the title screen instead of a grey wash over the ocean. */
 #lobby-overlay {
-  background: rgba(0, 0, 0, 0.45);
+  background-image: linear-gradient(rgba(4, 14, 26, 0.55), rgba(4, 14, 26, 0.75)),
+    url('/background.jpg');
+  background-size: cover;
+  background-position: center;
+  background-color: rgba(0, 0, 0, 0.45);
 }
 
 .hidden {
@@ -126,10 +132,31 @@ canvas {
   flex-shrink: 0;
 }
 
+/* Titles carry the pirate voice; everything else stays on the system stack so
+   the UI is readable before (and without) the webfont. */
 .modal h1 {
-  margin: 0 0 20px;
-  font-size: clamp(20px, 4vw, 36px);
+  margin: 0 0 18px;
+  font-family: 'Pirata One', 'Luminari', Georgia, serif;
+  font-weight: 400;
+  font-size: clamp(38px, 8vw, 68px);
+  line-height: 1.05;
   letter-spacing: 0.02em;
+  color: #ffe6a8;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55), 0 0 26px rgba(200, 134, 10, 0.35);
+}
+
+/* Crossed-anchor rule under the title */
+.modal h1::after {
+  content: '⚓';
+  display: block;
+  margin: 6px auto 0;
+  font-family: system-ui, sans-serif;
+  font-size: 15px;
+  color: rgba(255, 215, 94, 0.75);
+  text-shadow: none;
+  border-top: 1px solid rgba(255, 215, 94, 0.25);
+  width: min(320px, 70%);
+  padding-top: 8px;
 }
 
 .section-label {
@@ -157,22 +184,32 @@ canvas {
 .card-row.stacked {
   flex-direction: column;
   align-items: stretch;
-  max-width: 420px;
+  max-width: 460px;
   margin: 0 auto;
+  gap: 10px;
 }
 
 .card-row.stacked .card {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 16px;
   text-align: left;
-  padding: 13px 16px;
+  padding: 16px 20px;
+}
+
+.card-row.stacked .card-name {
+  font-size: 18px;
+  margin-bottom: 3px;
+}
+
+.card-row.stacked .card-stat {
+  font-size: 13px;
 }
 
 .card-glyph {
-  font-size: 24px;
+  font-size: 30px;
   line-height: 1;
-  width: 28px;
+  width: 34px;
   text-align: center;
   flex-shrink: 0;
 }
@@ -343,6 +380,11 @@ canvas {
 
 #set-sail:active {
   background: #a06c07;
+}
+
+#set-sail:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .hint {
@@ -623,12 +665,29 @@ canvas {
   color: #ffb0a0;
 }
 
+#room-code-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* The code gets read out loud and typed by hand — a brass plaque, and never
+   the display face: these letters have to be unmistakable. */
 .room-code {
-  font-size: clamp(28px, 5vw, 40px);
+  display: inline-block;
+  font-size: clamp(30px, 6vw, 46px);
   font-weight: 800;
-  letter-spacing: 0.35em;
+  letter-spacing: 0.3em;
+  /* the tracking is applied to the right of the last glyph too — pull it back
+     so the code sits centred inside its plaque */
+  text-indent: 0.3em;
   color: #ffd75e;
-  margin: 2px 0 6px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 2px solid rgba(255, 215, 94, 0.45);
+  border-radius: 12px;
+  box-shadow: inset 0 0 24px rgba(255, 215, 94, 0.12);
+  padding: 6px 18px;
+  margin: 4px 0 10px;
   user-select: all;
 }
 
@@ -639,34 +698,66 @@ canvas {
   margin-bottom: 4px;
 }
 
+/* The muster is the game's front room — let it breathe more than a dialog. */
+.lobby-modal .section-label {
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  color: rgba(255, 215, 94, 0.65);
+  margin: 20px 0 10px;
+}
+
+.lobby-modal .card {
+  min-width: 130px;
+  padding: 10px 16px;
+}
+
+/* A 21-strong fleet would push the ship picker off the screen, so the roster
+   scrolls inside itself and the controls below it stay reachable. */
 .lobby-players {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-width: 460px;
+  gap: 7px;
+  max-width: 520px;
+  max-height: 30svh;
+  overflow-y: auto;
   margin: 0 auto;
+  padding-right: 2px;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Phones scroll the whole sheet, so a scroll box inside a scroll box inside a
+   scrolling page just fights the thumb — let the roster run its full length. */
+@media (max-width: 700px) {
+  .lobby-players {
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 .lobby-player {
   display: flex;
   align-items: center;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  gap: 12px;
+  background: linear-gradient(rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05));
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 10px;
-  padding: 8px 14px;
-  font-size: 14px;
+  padding: 11px 16px;
+  font-size: 16px;
+  min-height: 52px;
   text-align: left;
 }
 
+/* Your own hull, picked out like the pink ship is on the water */
 .lobby-player.you {
   border-color: #ffd75e;
+  background: linear-gradient(rgba(255, 215, 94, 0.16), rgba(255, 215, 94, 0.05));
 }
 
 .lobby-player .dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
   flex-shrink: 0;
 }
 
@@ -679,18 +770,28 @@ canvas {
 }
 
 .lobby-player .pship {
-  color: rgba(255, 255, 255, 0.65);
+  color: rgba(255, 255, 255, 0.6);
   font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .lobby-player .pready {
-  font-size: 12px;
-  font-weight: 700;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
 }
 
 .lobby-player .pready.is-ready {
-  color: #6fdc76;
+  color: #8ef095;
+  border-color: rgba(111, 220, 118, 0.5);
+  background: rgba(111, 220, 118, 0.12);
 }
 
 .lobby-buttons {
