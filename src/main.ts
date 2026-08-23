@@ -278,28 +278,28 @@ function answer(row: Element, key: string, apply: () => void) {
 document.getElementById('wiz-back')!.addEventListener('click', menuBack);
 setSailBtn.addEventListener('click', () => footerAction?.());
 
-// Title screen: the three ways to play.
+// Title screen: the ways to play, plus the one that skips every question.
 const rootRow = document.getElementById('root-cards')!;
-const rootOptions: Array<{ key: MenuPath; glyph: string; label: string; stat: string }> = [
+const rootOptions: Array<{ key: MenuPath | 'lucky'; glyph: string; label: string; stat: string }> = [
   { key: 'practice', glyph: '⚔️', label: 'Practice', stat: 'one-on-one against a bot' },
   { key: 'bots', glyph: '🤖', label: 'Bots Arena', stat: 'free-for-all against a fleet of bots' },
   { key: 'friends', glyph: '🏴', label: 'Play with Friends', stat: 'create a room or join with a code' },
+  { key: 'lucky', glyph: '🎲', label: "I'm Feeling Lucky", stat: 'a random arena — sails at once' },
 ];
 rootOptions.forEach(({ key, glyph, label, stat }) => {
   const card = makeCard(label, stat, key, glyph);
-  card.addEventListener('click', () => openMenu(key));
+  card.addEventListener('click', () => (key === 'lucky' ? feelingLucky() : openMenu(key)));
   rootRow.appendChild(card);
 });
 
-// Hidden in plain sight on the title screen: rolls a whole Bots Arena — win
-// condition, hull, fleet size — and sails on the spot.
-document.getElementById('feeling-lucky')!.addEventListener('click', () => {
+/** Roll a whole Bots Arena — win condition, hull, fleet size — and sail. */
+function feelingLucky() {
   selectedPath = 'bots';
   selectedArenaMode = pickOne<MpMode>(['score', 'survival']);
   selectedShip = pickOne(Object.keys(SHIP_TYPES) as ShipTypeName[]);
   selectedBots = pickOne(BOT_COUNTS);
   startBotsArena();
-});
+}
 
 // Practice sub-modes: a single duel or endless survivor waves, both vs bot AI.
 const ptypeRow = document.getElementById('ptype-cards')!;
