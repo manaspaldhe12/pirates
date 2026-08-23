@@ -20,9 +20,8 @@ walks you through the rest, one card row per screen. Cards arrive unselected,
 so tapping one is what moves you on; breadcrumbs at the top jump back to any
 earlier answer and ← Back (or Esc) steps back one.
 
-There's also an **I'm feeling lucky** on the title screen, set small enough
-that you have to be looking for it. It rolls a whole Bots Arena — win
-condition, hull, fleet size — and sails on the spot.
+A fourth choice, **🎲 I'm Feeling Lucky**, skips every question: it rolls a
+whole Bots Arena — win condition, hull, fleet size — and sails on the spot.
 
 - **Practice** — a 1v1 duel or endless Survivor waves against the bot AI, with
   your hull, the enemy hull and the difficulty up to you.

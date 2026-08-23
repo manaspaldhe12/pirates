@@ -368,39 +368,6 @@ canvas {
   }
 }
 
-/* An easter egg, deliberately at the edge of legibility. Everything it does is
-   reachable through the Bots Arena path, so nothing is gated behind finding it
-   — and hover/focus brings it up to a readable size for anyone who does. */
-.lucky {
-  margin-top: 22px;
-  font-family: var(--font-body);
-  /* The size is what hides it. Dimming it as well over a busy backdrop made it
-     invisible rather than hard to see, so the letterforms stay legible — with a
-     shadow to hold them against the brighter parts of the harbour. */
-  font-size: 8px;
-  letter-spacing: 0.08em;
-  background: none;
-  border: none;
-  color: rgba(255, 255, 255, 0.62);
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
-  cursor: pointer;
-  padding: 4px 8px;
-  transition: color 0.15s, font-size 0.15s, letter-spacing 0.15s;
-}
-
-.lucky:hover,
-.lucky:focus-visible {
-  color: rgba(255, 215, 94, 0.85);
-  font-size: 13px;
-  letter-spacing: 0.12em;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lucky {
-    transition: none;
-  }
-}
-
 #set-sail {
   padding: 12px 40px;
   font-size: 26px;
