@@ -70,7 +70,11 @@ const MG_DURATION = 5; // s of continuous fire
 const DOUBLE_DURATION = 10; // s of firing both sides at once (barrels show on both)
 const SPEED_DURATION = 8; // s of double speed
 const SPEED_MULT = 2;
-const SHIELD_HITS = 5; // incoming hits absorbed
+// The shield is the only buff you could once bank for a whole match, which
+// rewarded hiding with it. It now runs on a clock like the rest: a short window
+// to go and pick a fight, and a ram shatters it outright.
+const SHIELD_HITS = 4; // incoming shots absorbed before it breaks
+const SHIELD_DURATION = 7; // s before it lapses, however many charges are left
 
 // Win score weights: sinking an enemy matters most, damage next, survival least.
 const SCORE_TIME = 0.1; // per second alive
@@ -140,7 +144,7 @@ const PICKUP_ORDER = Object.keys(PICKUP_SPAWN) as PickupType[];
 
 const PICKUP_META: Record<PickupType, { icon: string; color: string; label: string }> = {
   health: { icon: '➕', color: '#e8503a', label: '+1 HEALTH' },
-  shield: { icon: '⛨', color: '#3aa0e8', label: 'SHIELD ×5' },
+  shield: { icon: '⛨', color: '#3aa0e8', label: 'SHIELD ×4' },
   speed: { icon: '⚡', color: '#e8c53a', label: '2× SPEED' },
   double: { icon: '⇄', color: '#7bd15f', label: '2× FIRE' },
   machinegun: { icon: '⁘', color: '#e8892a', label: 'RAPID FIRE' },
@@ -262,6 +266,7 @@ interface Buff {
   doubleUntil: number;
   speedUntil: number;
   mgUntil: number;
+  shieldUntil: number; // charges live on the ship; this is when they lapse
   mgArmed: boolean; // machine gun picked up, waiting for the next trigger shot
 }
 
@@ -812,7 +817,7 @@ export class MpSession {
     };
     this.spawns.push(spawn);
     this.ships.push(new Ship(spawn.x, spawn.y, spawn.heading, spawn.color, spawn.type));
-    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false });
+    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, shieldUntil: 0, mgArmed: false });
     this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
     this.scores.push({ time: 0, damage: 0, kills: 0 });
     this.scoreView.push({ score: 0, kills: 0 });
@@ -915,6 +920,7 @@ export class MpSession {
       doubleUntil: 0,
       speedUntil: 0,
       mgUntil: 0,
+      shieldUntil: 0,
       mgArmed: false,
     }));
     this.buffView = this.spawns.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
@@ -1349,7 +1355,10 @@ export class MpSession {
     const victim = this.ships[vi];
     if (this.spawnUntil[vi] > this.clock) return false; // spawn-protected
     if (victim.shield > 0) {
-      victim.shield--; // a shield charge soaks the ram
+      // A ram is the hard counter: the shield stops this one, then shatters —
+      // however many charges and however much time it had left.
+      victim.shield = 0;
+      this.buffs[vi].shieldUntil = 0;
       return false;
     }
     const before = victim.health;
@@ -1398,7 +1407,7 @@ export class MpSession {
     ship.gunHighlight = false;
     ship.wake = [];
     // A respawn is a clean slate — old power-ups don't carry over.
-    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, mgArmed: false };
+    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, shieldUntil: 0, mgArmed: false };
     this.diveCharge[i] = DIVE_MAX;
     this.mag[i] = this.magCap[i]; // fresh magazine, nothing reloading
     this.reloadT[i] = 0;
@@ -1580,6 +1589,7 @@ export class MpSession {
         break;
       case 'shield':
         ship.shield = SHIELD_HITS;
+        b.shieldUntil = this.clock + SHIELD_DURATION;
         break;
       case 'speed':
         b.speedUntil = this.clock + SPEED_DURATION;
@@ -1596,6 +1606,8 @@ export class MpSession {
   private updateBuffView() {
     for (let i = 0; i < this.ships.length; i++) {
       const b = this.buffs[i];
+      // Charges left don't matter once the window closes.
+      if (this.ships[i].shield > 0 && b.shieldUntil <= this.clock) this.ships[i].shield = 0;
       this.buffView[i] = {
         shield: this.ships[i].shield,
         spd: b.speedUntil > this.clock,
