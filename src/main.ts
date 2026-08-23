@@ -74,27 +74,100 @@ const SHIP_ORDER: ShipTypeName[] = ['small', 'medium', 'large'];
 
 // ── Selection state ───────────────────────────────────────────────────────────
 
-type GameMode = 'practice' | 'multiplayer';
+type MenuPath = 'practice' | 'bots' | 'friends';
 type PracticeMode = 'duel' | 'survivor';
-let selectedMode: GameMode = 'practice';
+type RoomChoice = 'create' | 'join';
+
+let selectedPath: MenuPath | null = null;
 let selectedPractice: PracticeMode = 'duel';
-let selectedPlayer: ShipTypeName = 'small';
+let selectedShip: ShipTypeName = 'small';
 let selectedEnemy: ShipTypeName | 'random' = 'random';
 let selectedDifficulty: DifficultyName = 'easy';
+let selectedArenaMode: MpMode = 'score';
+let selectedBots = 10;
+let selectedRoom: RoomChoice = 'create';
 
 // Survivor wave state
 let survivorDiffIndex = 0;
 let survivorShipIndex = 0;
 let survivorKills = 0;
 
+// ── Remembered setup ──────────────────────────────────────────────────────────
+// The muster asks one question per screen, so a returning captain would retype
+// the same answers every visit. Persist them and pre-select the cards instead.
+
+const SETUP_KEY = 'pirates-setup';
+const BOT_COUNTS = [5, 10, 15];
+
+interface SavedSetup {
+  practice?: PracticeMode;
+  ship?: ShipTypeName;
+  enemy?: ShipTypeName | 'random';
+  difficulty?: DifficultyName;
+  arenaMode?: MpMode;
+  bots?: number;
+}
+
+let hasSavedSetup = false;
+
+function saveSetup() {
+  hasSavedSetup = true;
+  const setup: SavedSetup = {
+    practice: selectedPractice,
+    ship: selectedShip,
+    enemy: selectedEnemy,
+    difficulty: selectedDifficulty,
+    arenaMode: selectedArenaMode,
+    bots: selectedBots,
+  };
+  try {
+    localStorage.setItem(SETUP_KEY, JSON.stringify(setup));
+  } catch {
+    /* localStorage may be unavailable (e.g. private mode) */
+  }
+}
+
+// Every field is re-validated: a stale or hand-edited blob must never reach
+// startBattle() as an unknown ship type or difficulty.
+(function loadSetup() {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(SETUP_KEY);
+  } catch {
+    /* ignore */
+  }
+  if (!raw) return;
+  let s: SavedSetup;
+  try {
+    s = JSON.parse(raw) as SavedSetup;
+  } catch {
+    return;
+  }
+  if (s.practice === 'duel' || s.practice === 'survivor') selectedPractice = s.practice;
+  if (s.ship && s.ship in SHIP_TYPES) selectedShip = s.ship;
+  const enemy = s.enemy;
+  if (enemy === 'random' || (enemy !== undefined && enemy !== 'submarine' && enemy in SHIP_TYPES)) {
+    selectedEnemy = enemy;
+  }
+  if (s.difficulty && s.difficulty in DIFFICULTIES) selectedDifficulty = s.difficulty;
+  if (s.arenaMode === 'score' || s.arenaMode === 'survival') selectedArenaMode = s.arenaMode;
+  if (typeof s.bots === 'number' && BOT_COUNTS.includes(s.bots)) selectedBots = s.bots;
+  hasSavedSetup = true;
+})();
+
 // ── Build selection cards ─────────────────────────────────────────────────────
 
-function makeCard(label: string, stat: string, key: string): HTMLButtonElement {
+function makeCard(label: string, stat: string, key: string, glyph?: string): HTMLButtonElement {
   const btn = document.createElement('button');
   btn.className = 'card';
   btn.dataset.key = key;
-  btn.innerHTML = `<div class="card-name">${label}</div><div class="card-stat">${stat}</div>`;
+  const body = `<div class="card-name">${label}</div><div class="card-stat">${stat}</div>`;
+  btn.innerHTML = glyph ? `<span class="card-glyph">${glyph}</span><div>${body}</div>` : body;
   return btn;
+}
+
+function titleCase(s: string): string {
+  return s[0].toUpperCase() + s.slice(1);
 }
 
 function selectCard(row: Element, key: string) {
@@ -103,59 +176,194 @@ function selectCard(row: Element, key: string) {
   );
 }
 
-// Game mode cards
-const modeRow = document.getElementById('mode-cards')!;
-const enemySection = document.getElementById('enemy-section')!;
-const playerSection = document.getElementById('player-section')!;
-const difficultySection = document.getElementById('difficulty-section')!;
-const mpSection = document.getElementById('mp-section')!;
-const setSailBtn = document.getElementById('set-sail')!;
+const setSailBtn = document.getElementById('set-sail') as HTMLButtonElement;
 
-const practiceSection = document.getElementById('practice-section')!;
-const practiceRow = document.getElementById('practice-cards')!;
+// ── The muster: one question per screen ───────────────────────────────────────
+// Each step owns a panel (#step-<id>) and, when it ends its path, the footer
+// button. Picking a card is the "next" — only the launch needs a deliberate tap.
 
-const modeOptions: Array<{ key: GameMode; label: string; stat: string }> = [
-  { key: 'practice', label: 'Practice', stat: 'vs a bot · 1v1 or survivor' },
-  { key: 'multiplayer', label: 'Multiplayer', stat: 'free-for-all · bots or online' },
+interface Step {
+  id: string;
+  /** Breadcrumb text for the answer given here. */
+  crumb: () => string;
+  /** Not asked for the current answers (Survivor picks its own enemies). */
+  skip?: () => boolean;
+  /** Footer button, when this step ends its path. */
+  action?: () => { label: string; run: () => void };
+}
+
+const STEPS: Record<string, Step> = {
+  ptype: { id: 'ptype', crumb: () => (selectedPractice === 'duel' ? '1v1' : 'Survivor') },
+  ship: { id: 'ship', crumb: () => titleCase(selectedShip) },
+  enemy: {
+    id: 'enemy',
+    crumb: () => `vs ${titleCase(selectedEnemy)}`,
+    skip: () => selectedPractice === 'survivor',
+  },
+  difficulty: {
+    id: 'difficulty',
+    crumb: () => DIFFICULTIES[selectedDifficulty].label,
+    action: () => ({ label: '⚓ Set Sail', run: setSail }),
+  },
+  bmode: { id: 'bmode', crumb: () => (selectedArenaMode === 'score' ? 'Leaderboard' : 'Survivor') },
+  bcount: {
+    id: 'bcount',
+    crumb: () => `${selectedBots} bots`,
+    action: () => ({ label: '⚓ Set Sail', run: startBotsArena }),
+  },
+  fhow: { id: 'fhow', crumb: () => (selectedRoom === 'create' ? 'Create' : 'Join') },
+  fname: {
+    id: 'fname',
+    crumb: () => shipName(),
+    action: () =>
+      selectedRoom === 'create'
+        ? { label: '🏴 Create Room', run: createRoom }
+        : { label: '🧭 Join Room', run: joinRoom },
+  },
+};
+
+const PATHS: Record<MenuPath, string[]> = {
+  practice: ['ptype', 'ship', 'enemy', 'difficulty'],
+  bots: ['bmode', 'ship', 'bcount'],
+  friends: ['fhow', 'fname'],
+};
+
+const PATH_LABELS: Record<MenuPath, string> = {
+  practice: 'Practice',
+  bots: 'Bots Arena',
+  friends: 'Friends',
+};
+
+const stepPanels = new Map<string, HTMLElement>(
+  [...document.querySelectorAll<HTMLElement>('.step')].map((el) => [el.id.slice(5), el]),
+);
+
+const wizardBar = document.getElementById('wizard-bar')!;
+const wizCrumbs = document.getElementById('wiz-crumbs')!;
+const wizCount = document.getElementById('wiz-count')!;
+const menuTitle = document.getElementById('menu-title')!;
+const codeField = document.getElementById('code-field')!;
+
+/** -1 is the title screen; otherwise an index into activeSteps(). */
+let stepIndex = -1;
+let footerAction: (() => void) | null = null;
+
+function activeSteps(): Step[] {
+  if (!selectedPath) return [];
+  return PATHS[selectedPath].map((id) => STEPS[id]).filter((s) => !s.skip?.());
+}
+
+function renderMenu() {
+  const steps = activeSteps();
+  // An answer can retire a later step (Survivor drops "Enemy ship"), so the
+  // index is clamped rather than trusted.
+  if (stepIndex >= steps.length) stepIndex = steps.length - 1;
+  const atRoot = !selectedPath || stepIndex < 0;
+  const active = atRoot ? 'root' : steps[stepIndex].id;
+
+  stepPanels.forEach((panel, id) => panel.classList.toggle('hidden', id !== active));
+  menuTitle.classList.toggle('hidden', !atRoot);
+  if (atRoot) updateQuickBattle();
+  wizardBar.classList.toggle('hidden', atRoot);
+  wizCount.textContent = atRoot ? '' : `Step ${stepIndex + 1} of ${steps.length}`;
+  if (active === 'fname') codeField.classList.toggle('hidden', selectedRoom !== 'join');
+
+  // Breadcrumbs: the path, then every answer already given. Each one jumps back.
+  wizCrumbs.replaceChildren();
+  if (!atRoot && selectedPath) {
+    wizCrumbs.appendChild(makeCrumb(PATH_LABELS[selectedPath], () => openMenu(null)));
+    steps.slice(0, stepIndex).forEach((step, i) => {
+      wizCrumbs.appendChild(makeCrumb(step.crumb(), () => showStep(i)));
+    });
+  }
+
+  const action = atRoot ? undefined : steps[stepIndex].action?.();
+  footerAction = action?.run ?? null;
+  setSailBtn.classList.toggle('hidden', !action);
+  if (action) setSailBtn.textContent = action.label;
+}
+
+function makeCrumb(text: string, onClick: () => void): HTMLButtonElement {
+  const chip = document.createElement('button');
+  chip.type = 'button';
+  chip.className = 'crumb';
+  chip.textContent = text;
+  chip.addEventListener('click', onClick);
+  return chip;
+}
+
+function showStep(index: number) {
+  stepIndex = index;
+  renderMenu();
+}
+
+/** Show the muster at a given step (no path = the title screen). */
+function openMenu(path: MenuPath | null, index = 0) {
+  selectedPath = path;
+  stepIndex = path ? index : -1;
+  menuOverlay.classList.remove('hidden');
+  renderMenu();
+}
+
+function menuBack() {
+  if (stepIndex <= 0) openMenu(null);
+  else showStep(stepIndex - 1);
+}
+
+/** Record an answer and move on — the pick itself is the "next" button. */
+function answer(row: Element, key: string, apply: () => void) {
+  apply();
+  selectCard(row, key);
+  saveSetup();
+  if (stepIndex >= 0 && stepIndex < activeSteps().length - 1) stepIndex++;
+  renderMenu();
+}
+
+document.getElementById('wiz-back')!.addEventListener('click', menuBack);
+setSailBtn.addEventListener('click', () => footerAction?.());
+
+// Title screen: the three ways to play.
+const rootRow = document.getElementById('root-cards')!;
+const rootOptions: Array<{ key: MenuPath; glyph: string; label: string; stat: string }> = [
+  { key: 'practice', glyph: '⚔️', label: 'Practice', stat: 'one-on-one against a bot' },
+  { key: 'bots', glyph: '🤖', label: 'Bots Arena', stat: 'free-for-all against a fleet of bots' },
+  { key: 'friends', glyph: '🏴', label: 'Play with Friends', stat: 'create a room or join with a code' },
 ];
-
-modeOptions.forEach(({ key, label, stat }) => {
-  const card = makeCard(label, stat, key);
-  card.addEventListener('click', () => {
-    selectedMode = key;
-    selectCard(modeRow, key);
-    updateModeUI();
-  });
-  modeRow.appendChild(card);
+rootOptions.forEach(({ key, glyph, label, stat }) => {
+  const card = makeCard(label, stat, key, glyph);
+  card.addEventListener('click', () => openMenu(key));
+  rootRow.appendChild(card);
 });
 
-selectCard(modeRow, selectedMode);
+// One tap back to the last practice setup — the wizard's one cost is taps.
+const quickBtn = document.getElementById('quick-battle') as HTMLButtonElement;
+quickBtn.addEventListener('click', () => {
+  selectedPath = 'practice';
+  setSail();
+});
+
+function updateQuickBattle() {
+  quickBtn.classList.toggle('hidden', !hasSavedSetup);
+  if (!hasSavedSetup) return;
+  const what =
+    selectedPractice === 'survivor'
+      ? `Survivor · ${titleCase(selectedShip)}`
+      : `${titleCase(selectedShip)} vs ${titleCase(selectedEnemy)} · ${DIFFICULTIES[selectedDifficulty].label}`;
+  quickBtn.textContent = `⚡ Quick Battle — ${what}`;
+}
 
 // Practice sub-modes: a single duel or endless survivor waves, both vs bot AI.
+const ptypeRow = document.getElementById('ptype-cards')!;
 const practiceOptions: Array<{ key: PracticeMode; label: string; stat: string }> = [
   { key: 'duel', label: '1v1', stat: 'one battle · win or lose' },
-  { key: 'survivor', label: 'Survivor', stat: 'fight until you sink' },
+  { key: 'survivor', label: 'Survivor', stat: 'endless waves · fight until you sink' },
 ];
 practiceOptions.forEach(({ key, label, stat }) => {
   const card = makeCard(label, stat, key);
-  card.addEventListener('click', () => {
-    selectedPractice = key;
-    selectCard(practiceRow, key);
-    updateModeUI();
-  });
-  practiceRow.appendChild(card);
+  card.addEventListener('click', () => answer(ptypeRow, key, () => (selectedPractice = key)));
+  ptypeRow.appendChild(card);
 });
-selectCard(practiceRow, selectedPractice);
-
-function updateModeUI() {
-  const mp = selectedMode === 'multiplayer';
-  practiceSection.classList.toggle('hidden', mp);
-  playerSection.classList.toggle('hidden', mp);
-  difficultySection.classList.toggle('hidden', mp);
-  enemySection.classList.toggle('hidden', mp || selectedPractice === 'survivor');
-  mpSection.classList.toggle('hidden', !mp);
-  setSailBtn.classList.toggle('hidden', mp);
-}
+selectCard(ptypeRow, selectedPractice);
 
 /** Card stat line for a hull (submarine gets its own blurb). */
 function shipStat(type: ShipTypeName): string {
@@ -165,33 +373,24 @@ function shipStat(type: ShipTypeName): string {
     : `${s.guns} guns · ${SPEED_LABELS[type]} · ${s.maxHealth} hp`;
 }
 
-// Player ship cards — all hulls, submarine included.
-const playerRow = document.getElementById('player-cards')!;
+// Your ship — all hulls, submarine included. Shared by Practice and Bots Arena.
+const shipRow = document.getElementById('ship-cards')!;
 (Object.keys(SHIP_TYPES) as ShipTypeName[]).forEach((type) => {
-  const card = makeCard(type[0].toUpperCase() + type.slice(1), shipStat(type), type);
-  card.addEventListener('click', () => {
-    selectedPlayer = type;
-    selectCard(playerRow, type);
-  });
-  playerRow.appendChild(card);
+  const card = makeCard(titleCase(type), shipStat(type), type);
+  card.addEventListener('click', () => answer(shipRow, type, () => (selectedShip = type)));
+  shipRow.appendChild(card);
 });
-selectCard(playerRow, selectedPlayer);
+selectCard(shipRow, selectedShip);
 
 // Enemy ship cards (includes Random; the enemy AI stays on sailing hulls)
 const enemyRow = document.getElementById('enemy-cards')!;
 SAIL_TYPES.forEach((type) => {
-  const card = makeCard(type[0].toUpperCase() + type.slice(1), shipStat(type), type);
-  card.addEventListener('click', () => {
-    selectedEnemy = type;
-    selectCard(enemyRow, type);
-  });
+  const card = makeCard(titleCase(type), shipStat(type), type);
+  card.addEventListener('click', () => answer(enemyRow, type, () => (selectedEnemy = type)));
   enemyRow.appendChild(card);
 });
 const randomCard = makeCard('Random', 'any of the three', 'random');
-randomCard.addEventListener('click', () => {
-  selectedEnemy = 'random';
-  selectCard(enemyRow, 'random');
-});
+randomCard.addEventListener('click', () => answer(enemyRow, 'random', () => (selectedEnemy = 'random')));
 enemyRow.appendChild(randomCard);
 selectCard(enemyRow, selectedEnemy);
 
@@ -204,13 +403,49 @@ const diffRow = document.getElementById('difficulty-cards')!;
     hard: 'same reload · leads shots · sails wind',
   };
   const card = makeCard(DIFFICULTIES[name].label, blurbs[name], name);
-  card.addEventListener('click', () => {
-    selectedDifficulty = name;
-    selectCard(diffRow, name);
-  });
+  card.addEventListener('click', () => answer(diffRow, name, () => (selectedDifficulty = name)));
   diffRow.appendChild(card);
 });
 selectCard(diffRow, selectedDifficulty);
+
+// ── Bots Arena cards ──────────────────────────────────────────────────────────
+
+// The win condition — the same two the lobby offers, asked up front instead.
+const mpModeOptions: Array<{ key: MpMode; label: string; stat: string }> = [
+  { key: 'score', label: 'Leaderboard', stat: '90s deathmatch · respawns' },
+  { key: 'survival', label: 'Survivor', stat: 'last one standing wins' },
+];
+
+const bmodeRow = document.getElementById('bmode-cards')!;
+mpModeOptions.forEach(({ key, label, stat }) => {
+  const card = makeCard(label, stat, key);
+  card.addEventListener('click', () => answer(bmodeRow, key, () => (selectedArenaMode = key)));
+  bmodeRow.appendChild(card);
+});
+selectCard(bmodeRow, selectedArenaMode);
+
+const bcountRow = document.getElementById('bcount-cards')!;
+const botBlurbs = ['a quick skirmish', 'a proper brawl', 'full armada chaos'];
+BOT_COUNTS.forEach((n, i) => {
+  const card = makeCard(`${n} Bots`, botBlurbs[i], String(n));
+  card.addEventListener('click', () => answer(bcountRow, String(n), () => (selectedBots = n)));
+  bcountRow.appendChild(card);
+});
+selectCard(bcountRow, String(selectedBots));
+
+// ── Play with Friends cards ───────────────────────────────────────────────────
+
+const fhowRow = document.getElementById('fhow-cards')!;
+const roomOptions: Array<{ key: RoomChoice; glyph: string; label: string; stat: string }> = [
+  { key: 'create', glyph: '🏴', label: 'Create a Room', stat: "you're the host — share a 5-letter code" },
+  { key: 'join', glyph: '🧭', label: 'Join a Room', stat: 'got a code from a friend?' },
+];
+roomOptions.forEach(({ key, glyph, label, stat }) => {
+  const card = makeCard(label, stat, key, glyph);
+  card.addEventListener('click', () => answer(fhowRow, key, () => (selectedRoom = key)));
+  fhowRow.appendChild(card);
+});
+selectCard(fhowRow, selectedRoom);
 
 // ── Overlay refs ──────────────────────────────────────────────────────────────
 
@@ -229,21 +464,19 @@ function startSurvivor() {
   survivorShipIndex = 0;
   survivorKills = 0;
   game.survivorKills = 0;
-  game.startBattle(selectedPlayer, SHIP_ORDER[0], DIFFICULTY_ORDER[survivorDiffIndex]);
+  game.startBattle(selectedShip, SHIP_ORDER[0], DIFFICULTY_ORDER[survivorDiffIndex]);
 }
 
 function setSail() {
-  if (selectedMode === 'multiplayer') return;
+  saveSetup();
   menuOverlay.classList.add('hidden');
   if (selectedPractice === 'survivor') {
     startSurvivor();
   } else {
     game.survivorKills = null;
-    game.startBattle(selectedPlayer, selectedEnemy, selectedDifficulty);
+    game.startBattle(selectedShip, selectedEnemy, selectedDifficulty);
   }
 }
-
-document.getElementById('set-sail')!.addEventListener('click', setSail);
 
 // ── Game-over handling ────────────────────────────────────────────────────────
 
@@ -291,7 +524,7 @@ btnReplay.addEventListener('click', () => {
   if (selectedPractice === 'survivor') {
     startSurvivor();
   } else {
-    game.startBattle(selectedPlayer, selectedEnemy, selectedDifficulty);
+    game.startBattle(selectedShip, selectedEnemy, selectedDifficulty);
   }
 });
 
@@ -302,12 +535,12 @@ btnHarder.addEventListener('click', () => {
     selectCard(diffRow, selectedDifficulty);
   }
   gameoverOverlay.classList.add('hidden');
-  game.startBattle(selectedPlayer, selectedEnemy, selectedDifficulty);
+  game.startBattle(selectedShip, selectedEnemy, selectedDifficulty);
 });
 
 btnMenu.addEventListener('click', () => {
   gameoverOverlay.classList.add('hidden');
-  menuOverlay.classList.remove('hidden');
+  openMenu(null);
 });
 
 // R key: Play Again (works in both modes).
@@ -317,7 +550,7 @@ window.addEventListener('keydown', (e) => {
     if (selectedPractice === 'survivor') {
       startSurvivor();
     } else {
-      game.startBattle(selectedPlayer, selectedEnemy, selectedDifficulty);
+      game.startBattle(selectedShip, selectedEnemy, selectedDifficulty);
     }
   }
 });
@@ -326,8 +559,6 @@ window.addEventListener('keydown', (e) => {
 
 const mpNameInput = document.getElementById('mp-name') as HTMLInputElement;
 const mpCodeInput = document.getElementById('mp-code') as HTMLInputElement;
-const mpCreateBtn = document.getElementById('mp-create') as HTMLButtonElement;
-const mpJoinBtn = document.getElementById('mp-join') as HTMLButtonElement;
 const mpStatus = document.getElementById('mp-status')!;
 
 const lobbyOverlay = document.getElementById('lobby-overlay')!;
@@ -355,13 +586,12 @@ const mpendWait = document.getElementById('mpend-wait')!;
 let mp: MpSession | null = null;
 let myReady = false;
 let myShip: ShipTypeName = 'small';
+// Bot count while a Bots Arena game is being launched — non-null means "skip
+// the lobby entirely", which also relabels the end screen's lobby button.
+let arenaBots: number | null = null;
 
 // Battle-mode cards inside the lobby — the host picks the win condition.
 const lobbyModeRow = document.getElementById('lobby-mode-cards')!;
-const mpModeOptions: Array<{ key: MpMode; label: string; stat: string }> = [
-  { key: 'score', label: 'Leaderboard', stat: '90s deathmatch · respawns' },
-  { key: 'survival', label: 'Survivor', stat: 'last one standing wins' },
-];
 mpModeOptions.forEach(({ key, label, stat }) => {
   const card = makeCard(label, stat, key);
   card.addEventListener('click', () => mp?.setMode(key)); // no-op for guests
@@ -370,7 +600,7 @@ mpModeOptions.forEach(({ key, label, stat }) => {
 
 // Ship cards inside the lobby — each captain picks their own boat.
 (Object.keys(SHIP_TYPES) as ShipTypeName[]).forEach((type) => {
-  const card = makeCard(type[0].toUpperCase() + type.slice(1), shipStat(type), type);
+  const card = makeCard(titleCase(type), shipStat(type), type);
   card.addEventListener('click', () => {
     myShip = type;
     selectCard(lobbyShipRow, type);
@@ -442,8 +672,8 @@ function renderLobby(players: LobbyPlayerInfo[], you: number, canStart: boolean,
   const readyCount = players.filter((p) => p.ready).length;
   if (players.length < 2) {
     lobbyStatus.textContent = isHost
-      ? 'Waiting for captains — invite friends or add bots…'
-      : 'Waiting for at least one more captain…';
+      ? 'Waiting for ships — invite friends or add bots…'
+      : 'Waiting for at least one more ship…';
   } else if (readyCount < players.length) {
     // Ready is advisory — the host can launch anyway and stragglers sail in as-is.
     lobbyStatus.textContent = isHost
@@ -455,16 +685,20 @@ function renderLobby(players: LobbyPlayerInfo[], you: number, canStart: boolean,
 }
 
 function endMpSession(errorMessage?: string) {
+  const wasArena = arenaBots !== null;
   mp?.leave();
   mp = null;
+  arenaBots = null;
   myReady = false;
   game.suspended = false;
   lobbyOverlay.classList.add('hidden');
   mpendOverlay.classList.add('hidden');
-  menuOverlay.classList.remove('hidden');
+  setSailBtn.disabled = false;
+  // Back to the step that owns this kind of game — with an error to read, land
+  // on the name/code screen where it can be acted on.
+  if (wasArena) openMenu('bots');
+  else openMenu('friends', errorMessage ? 1 : 0);
   mpStatus.textContent = errorMessage ?? '';
-  mpCreateBtn.disabled = false;
-  mpJoinBtn.disabled = false;
 }
 
 function mpCallbacks() {
@@ -477,13 +711,21 @@ function mpCallbacks() {
         ? 'Room code — share it with your crew'
         : 'Room code';
       copyLinkBtn.classList.toggle('hidden', !code);
+      if (arenaBots !== null) {
+        // Bots Arena: the lobby has nothing left to ask, so stock it and sail.
+        mp?.setMode(selectedArenaMode);
+        mp?.setShip(selectedShip);
+        mp?.fillBots(arenaBots);
+        mp?.startBattle();
+        return;
+      }
       menuOverlay.classList.add('hidden');
       lobbyOverlay.classList.remove('hidden');
-      mpCreateBtn.disabled = false;
-      mpJoinBtn.disabled = false;
+      setSailBtn.disabled = false;
     },
     onRoomCode(code: string | null) {
       currentRoomCode = code ?? '';
+      if (arenaBots !== null) return; // no lobby to update, no code to share
       copyLinkBtn.classList.toggle('hidden', !code);
       if (code) {
         roomCodeEl.textContent = code;
@@ -509,8 +751,7 @@ function mpCallbacks() {
       lobbyOverlay.classList.add('hidden');
       mpendOverlay.classList.add('hidden');
       mpStatus.textContent = '';
-      mpCreateBtn.disabled = false;
-      mpJoinBtn.disabled = false;
+      setSailBtn.disabled = false;
       game.suspended = true;
     },
     onEnd(winnerName: string | null) {
@@ -525,6 +766,9 @@ function mpCallbacks() {
       mpendBoard.replaceChildren(...board.map((e, i) => renderLbRow(e, i + 1)));
       const isHost = mp?.isHost ?? false;
       btnRematch.classList.toggle('hidden', !isHost);
+      // In an arena the lobby is a screen the player never saw — it's where you
+      // go to change the mode or the bot count, so name it that.
+      btnToLobby.textContent = arenaBots !== null ? 'Change Fleet' : 'Back to Lobby';
       btnToLobby.classList.toggle('hidden', !isHost);
       mpendWait.classList.toggle('hidden', isHost);
       mpendOverlay.classList.remove('hidden');
@@ -540,22 +784,22 @@ function mpCallbacks() {
   };
 }
 
-// Pre-fill the name box: the remembered name, else a random pirate suggestion —
+// Pre-fill the name box: the remembered name, else a random hull suggestion —
 // so blank joins (which used to leave everyone named "Captain") are rare. The
 // host still de-dupes clashes into "Name 2", "Name 3", …
-const NAME_IDEAS = [
-  'Red Beard',
+const SHIP_NAME_IDEAS = [
   'Sea Wolf',
-  'Storm Rider',
-  'Gold Tooth',
-  'Iron Hook',
-  'Wave Dancer',
-  'Salt Dog',
-  'Lucky Finn',
-  'Coral Queen',
-  'Tide Turner',
   'Black Sails',
-  'Grog Baron',
+  'Storm Rider',
+  'Wave Dancer',
+  'Tide Turner',
+  'Coral Queen',
+  'Salt Serpent',
+  'Iron Gull',
+  'Night Tern',
+  'Red Kraken',
+  'Gale Runner',
+  'Bone Lantern',
 ];
 try {
   mpNameInput.value = localStorage.getItem('pirates-name') ?? '';
@@ -563,10 +807,15 @@ try {
   /* ignore */
 }
 if (!mpNameInput.value) {
-  mpNameInput.value = NAME_IDEAS[Math.floor(Math.random() * NAME_IDEAS.length)];
+  mpNameInput.value = SHIP_NAME_IDEAS[Math.floor(Math.random() * SHIP_NAME_IDEAS.length)];
 }
 
-/** Remember the captain name so invite links can auto-join next time. */
+/** The ship's name, never blank — Bots Arena never asks for one. */
+function shipName(): string {
+  return mpNameInput.value.trim() || SHIP_NAME_IDEAS[0];
+}
+
+/** Remember the ship's name so invite links can auto-join next time. */
 function rememberName() {
   const n = mpNameInput.value.trim();
   if (!n) return;
@@ -577,18 +826,17 @@ function rememberName() {
   }
 }
 
-mpCreateBtn.addEventListener('click', () => {
+function createRoom() {
   if (mp) return;
   rememberName();
   mpStatus.textContent = 'Opening room…';
-  mpCreateBtn.disabled = true;
-  mpJoinBtn.disabled = true;
-  mp = MpSession.host(mpNameInput.value, ctx, input, mpCallbacks(), sounds);
+  setSailBtn.disabled = true;
+  mp = MpSession.host(shipName(), ctx, input, mpCallbacks(), sounds);
   // Dev-only hook so E2E tests can observe the session; stripped in prod.
   if (import.meta.env.DEV) (window as unknown as { __mp: MpSession }).__mp = mp;
-});
+}
 
-mpJoinBtn.addEventListener('click', () => {
+function joinRoom() {
   if (mp) return;
   const code = mpCodeInput.value.toUpperCase().trim();
   if (code.length !== CODE_LENGTH) {
@@ -597,20 +845,27 @@ mpJoinBtn.addEventListener('click', () => {
   }
   rememberName();
   mpStatus.textContent = 'Joining…';
-  mpCreateBtn.disabled = true;
-  mpJoinBtn.disabled = true;
-  mp = MpSession.join(code, mpNameInput.value, ctx, input, mpCallbacks(), sounds);
-});
+  setSailBtn.disabled = true;
+  mp = MpSession.join(code, shipName(), ctx, input, mpCallbacks(), sounds);
+}
 
+/** Bots Arena: host a room only we will ever see, stock it, and start. */
+function startBotsArena() {
+  if (mp) return;
+  saveSetup();
+  arenaBots = selectedBots;
+  mpStatus.textContent = '';
+  setSailBtn.disabled = true;
+  mp = MpSession.host(shipName(), ctx, input, mpCallbacks(), sounds);
+  if (import.meta.env.DEV) (window as unknown as { __mp: MpSession }).__mp = mp;
+}
+
+// Enter in either field is the same as pressing the footer button.
 mpCodeInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') mpJoinBtn.click();
+  if (e.key === 'Enter') setSailBtn.click();
 });
-
-// Enter in the name field: join if a code is filled in, otherwise create.
 mpNameInput.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter') return;
-  if (mpCodeInput.value.trim().length === CODE_LENGTH) mpJoinBtn.click();
-  else mpCreateBtn.click();
+  if (e.key === 'Enter') setSailBtn.click();
 });
 
 // Copy a clickable invite link — opening it joins this room directly.
@@ -739,9 +994,19 @@ const rulesClose = document.getElementById('rules-close')!;
 
 helpBtn.addEventListener('click', () => rulesOverlay.classList.toggle('hidden'));
 rulesClose.addEventListener('click', () => rulesOverlay.classList.add('hidden'));
+// Escape closes the rules if they're up, otherwise it's the muster's Back.
 window.addEventListener('keydown', (e) => {
-  if (e.code === 'Escape') rulesOverlay.classList.add('hidden');
+  if (e.code !== 'Escape') return;
+  if (!rulesOverlay.classList.contains('hidden')) {
+    rulesOverlay.classList.add('hidden');
+  } else if (!menuOverlay.classList.contains('hidden')) {
+    menuBack();
+  }
 });
+
+// ── Open the muster ───────────────────────────────────────────────────────────
+
+openMenu(null);
 
 // ── Invite links ──────────────────────────────────────────────────────────────
 // Opening .../#room=ABCDE jumps straight into that room: auto-join if we know
@@ -756,10 +1021,11 @@ window.addEventListener('keydown', (e) => {
   // Consume the hash so a later refresh doesn't silently re-join.
   history.replaceState(null, '', location.pathname + location.search);
 
-  selectedMode = 'multiplayer';
-  selectCard(modeRow, 'multiplayer');
-  updateModeUI();
+  // Straight to the join step, code already filled in.
+  selectedRoom = 'join';
+  selectCard(fhowRow, 'join');
   mpCodeInput.value = code;
+  openMenu('friends', 1);
 
   let savedName = '';
   try {
@@ -769,9 +1035,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (savedName) {
     mpNameInput.value = savedName;
-    mpJoinBtn.click(); // straight into the lobby
+    joinRoom(); // straight into the lobby
   } else {
-    mpStatus.textContent = `You're invited to room ${code} — enter a captain name to join!`;
+    mpStatus.textContent = `You're invited to room ${code} — name your ship to join!`;
     mpNameInput.focus();
   }
 })();

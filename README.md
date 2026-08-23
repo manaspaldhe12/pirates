@@ -12,13 +12,27 @@ bots — battle in a shared free-for-all arena dotted with islands to hide behin
 No server of your own needed — peers connect directly over WebRTC
 ([PeerJS](https://peerjs.com/)), so it still deploys as plain static files.
 
+## Choosing a battle
+
+The opening screen asks one question at a time. Start with how you want to
+play — **Practice**, **Bots Arena**, or **Play with Friends** — and the muster
+walks you through the rest, one card row per screen. Breadcrumbs at the top
+jump back to any earlier answer, ← Back (or Esc) steps back one, and your picks
+are remembered for next time — **⚡ Quick Battle** relaunches the last practice
+setup in a single tap.
+
+- **Practice** — a 1v1 duel or endless Survivor waves against the bot AI, with
+  your hull, the enemy hull and the difficulty up to you.
+- **Bots Arena** — a free-for-all against **5, 10, or 15 bots**. Pick the win
+  condition and your ship and it sails immediately: no room code, no lobby.
+- **Play with Friends** — see below.
+
 ## Multiplayer
 
-Pick **Multiplayer** on the menu, enter a captain name, and either **Create
-Room** (you get a 5-letter room code) or **Join** with a friend's code. In the
-lobby every captain chooses their own boat and readies up; the host starts the
-battle once 2–11 captains are in. Solo? Hit **Fill with Bots** for an instant
-10-bot brawl.
+Pick **Play with Friends**, then **Create a Room** (you get a 5-letter room
+code) or **Join a Room** with a friend's code, naming your ship on the way in.
+In the lobby every captain chooses their own boat and readies up; the host
+starts the battle once 2–11 captains are in.
 
 - **Free-for-all** — a shared arena where it's sink or be sunk. Play a timed
   Leaderboard deathmatch (respawns) or last-ship-standing Survivor.
@@ -72,7 +86,8 @@ battle once 2–11 captains are in. Solo? Hit **Fill with Bots** for an instant
   pause before anyone can move or fire.
 - **How to play** — the ❓ button (top-left) opens a full rules reference:
   wind, combat, islands, ramming, power-ups, submarine, maelstrom, scoring.
-- **Bots** — no friends online? The host can fill empty slots with AI captains:
+- **Bots** — no friends online? **Bots Arena** on the opening screen is the
+  one-tap version; inside a room the host can also fill empty slots by hand:
   **Add Bot 🤖** one at a time, **Fill with Bots** for an instant 10-captain
   brawl, then **+10 Bots** to pile on up to 21 captains total. Bots hunt the
   most promising target
