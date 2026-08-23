@@ -10,11 +10,16 @@
     <meta http-equiv="Cache-Control" content="no-cache, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <title>Pirates: Naval Combat</title>
-    <!-- Display face for the big titles only — body copy stays on the system
-         stack so the UI never waits on a font to be readable. -->
+    <!-- Two faces: Pirata One for titles, names and buttons; EB Garamond for
+         everything you actually read. Both swap in over a serif fallback, so
+         the UI is legible before either arrives. The in-game HUD stays on the
+         system stack — it has to be read at a glance mid-battle. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Pirata+One&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Pirata+One&family=EB+Garamond:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-6PX28XX4W9"></script>
     <script>
@@ -182,7 +187,9 @@
           <div class="step" id="step-root">
             <div class="section-label">Choose your battle</div>
             <div class="card-row stacked" id="root-cards"></div>
-            <button id="quick-battle" type="button" class="quick-battle hidden"></button>
+            <button id="feeling-lucky" type="button" class="lucky" title="Roll a random Bots Arena and sail at once">
+              I'm feeling lucky
+            </button>
           </div>
 
           <div class="step hidden" id="step-ptype">

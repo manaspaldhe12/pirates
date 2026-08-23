@@ -92,70 +92,9 @@ let survivorDiffIndex = 0;
 let survivorShipIndex = 0;
 let survivorKills = 0;
 
-// ── Remembered setup ──────────────────────────────────────────────────────────
-// The muster asks one question per screen, so a returning captain would retype
-// the same answers every visit. Persist them so Quick Battle can replay the
-// last setup in one tap. The cards themselves never come back highlighted —
-// see renderMenu().
-
-const SETUP_KEY = 'pirates-setup';
 const BOT_COUNTS = [5, 10, 15];
 
-interface SavedSetup {
-  practice?: PracticeMode;
-  ship?: ShipTypeName;
-  enemy?: ShipTypeName | 'random';
-  difficulty?: DifficultyName;
-  arenaMode?: MpMode;
-  bots?: number;
-}
-
-let hasSavedSetup = false;
-
-function saveSetup() {
-  hasSavedSetup = true;
-  const setup: SavedSetup = {
-    practice: selectedPractice,
-    ship: selectedShip,
-    enemy: selectedEnemy,
-    difficulty: selectedDifficulty,
-    arenaMode: selectedArenaMode,
-    bots: selectedBots,
-  };
-  try {
-    localStorage.setItem(SETUP_KEY, JSON.stringify(setup));
-  } catch {
-    /* localStorage may be unavailable (e.g. private mode) */
-  }
-}
-
-// Every field is re-validated: a stale or hand-edited blob must never reach
-// startBattle() as an unknown ship type or difficulty.
-(function loadSetup() {
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(SETUP_KEY);
-  } catch {
-    /* ignore */
-  }
-  if (!raw) return;
-  let s: SavedSetup;
-  try {
-    s = JSON.parse(raw) as SavedSetup;
-  } catch {
-    return;
-  }
-  if (s.practice === 'duel' || s.practice === 'survivor') selectedPractice = s.practice;
-  if (s.ship && s.ship in SHIP_TYPES) selectedShip = s.ship;
-  const enemy = s.enemy;
-  if (enemy === 'random' || (enemy !== undefined && enemy !== 'submarine' && enemy in SHIP_TYPES)) {
-    selectedEnemy = enemy;
-  }
-  if (s.difficulty && s.difficulty in DIFFICULTIES) selectedDifficulty = s.difficulty;
-  if (s.arenaMode === 'score' || s.arenaMode === 'survival') selectedArenaMode = s.arenaMode;
-  if (typeof s.bots === 'number' && BOT_COUNTS.includes(s.bots)) selectedBots = s.bots;
-  hasSavedSetup = true;
-})();
+const pickOne = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
 
 // ── Build selection cards ─────────────────────────────────────────────────────
 
@@ -269,7 +208,6 @@ function renderMenu() {
 
   stepPanels.forEach((panel, id) => panel.classList.toggle('hidden', id !== active));
   menuTitle.classList.toggle('hidden', !atRoot);
-  if (atRoot) updateQuickBattle();
 
   // Arriving at a step, nothing is highlighted — a card left looking "chosen"
   // reads as done, and you can't tell that tapping it is what moves you on.
@@ -333,7 +271,6 @@ function menuBack() {
 function answer(row: Element, key: string, apply: () => void) {
   apply();
   selectCard(row, key);
-  saveSetup();
   if (stepIndex >= 0 && stepIndex < activeSteps().length - 1) stepIndex++;
   renderMenu();
 }
@@ -354,22 +291,15 @@ rootOptions.forEach(({ key, glyph, label, stat }) => {
   rootRow.appendChild(card);
 });
 
-// One tap back to the last practice setup — the wizard's one cost is taps.
-const quickBtn = document.getElementById('quick-battle') as HTMLButtonElement;
-quickBtn.addEventListener('click', () => {
-  selectedPath = 'practice';
-  setSail();
+// Hidden in plain sight on the title screen: rolls a whole Bots Arena — win
+// condition, hull, fleet size — and sails on the spot.
+document.getElementById('feeling-lucky')!.addEventListener('click', () => {
+  selectedPath = 'bots';
+  selectedArenaMode = pickOne<MpMode>(['score', 'survival']);
+  selectedShip = pickOne(Object.keys(SHIP_TYPES) as ShipTypeName[]);
+  selectedBots = pickOne(BOT_COUNTS);
+  startBotsArena();
 });
-
-function updateQuickBattle() {
-  quickBtn.classList.toggle('hidden', !hasSavedSetup);
-  if (!hasSavedSetup) return;
-  const what =
-    selectedPractice === 'survivor'
-      ? `Survivor · ${titleCase(selectedShip)}`
-      : `${titleCase(selectedShip)} vs ${titleCase(selectedEnemy)} · ${DIFFICULTIES[selectedDifficulty].label}`;
-  quickBtn.textContent = `⚡ Quick Battle — ${what}`;
-}
 
 // Practice sub-modes: a single duel or endless survivor waves, both vs bot AI.
 const ptypeRow = document.getElementById('ptype-cards')!;
@@ -480,7 +410,6 @@ function startSurvivor() {
 }
 
 function setSail() {
-  saveSetup();
   menuOverlay.classList.add('hidden');
   if (selectedPractice === 'survivor') {
     startSurvivor();
@@ -873,7 +802,6 @@ function joinRoom() {
 /** Bots Arena: host a room only we will ever see, stock it, and start. */
 function startBotsArena() {
   if (mp) return;
-  saveSetup();
   arenaBots = selectedBots;
   mpStatus.textContent = '';
   setSailBtn.disabled = true;
