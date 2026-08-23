@@ -319,7 +319,12 @@ export function decideBot(
   buffs: BotBuffState = { dbl: false, mg: false },
 ): BotDecision {
   // Submerged submarines are invisible — bots can't target what they can't see.
-  const enemies = ships.filter((s) => s !== self && s.alive && s.depth <= 0.5);
+  // Team Mode: teammates never read as enemies, so bots never hunt, rake, ram,
+  // or flee from their own side (self.team is null outside Team Mode, so this
+  // is a no-op there).
+  const enemies = ships.filter(
+    (s) => s !== self && s.alive && s.depth <= 0.5 && (!self.team || s.team !== self.team),
+  );
   if (!self.alive || enemies.length === 0) return { turn: 0, fire: false };
 
   // Nearest threat (for self-preservation) and best target (close + damaged).
