@@ -57,9 +57,11 @@ starts the battle once 2–11 captains are in.
 - **Power-ups** — bounties bob in the water (often just off an island's lethal
   shore, so grabbing them is a risk): **❤️ Health** (+1 hp, common),
   **🛡️ Shield** (soak the next 5 hits), **⚡ Speed** (double speed), **↔️ Double**
-  (fire both broadsides at once), and **Machine-gun** (your next shot opens
-  5 s of rapid continuous fire). Each bounty is labeled so it's clear what it
-  grants, and active buffs show as tags and auras on your hull.
+  (fire both broadsides at once), **Machine-gun** (your next shot opens
+  5 s of rapid continuous fire), **🎯 Range** (double cannon range for a
+  normal hull), and **💥 Damage** (double cannon/torpedo damage). Each bounty
+  is labeled so it's clear what it grants, and active buffs show as tags and
+  auras on your hull.
 - **Fair start** — everyone spawns scattered in random directions inside a
   golden **2-second shield bubble** (fully invulnerable), so you get a moment
   to orient before anyone can be hit.
@@ -81,7 +83,9 @@ starts the battle once 2–11 captains are in.
   you're invisible and immune to shots and rams, but you can't fire or grab
   pickups, and a dive-charge meter limits your time under (refills on the
   surface). Islands still sink you; the maelstrom still pulls you. Power-ups
-  adapt: Double gives a torpedo spread, Rapid Fire a torpedo stream.
+  adapt: Double gives a torpedo spread, Rapid Fire a torpedo stream, and
+  Damage still doubles torpedo damage — but Range is dead weight, since
+  torpedoes already run the length of the map.
 - **Wakes & you-marker** — every ship leaves a fading wake as it sails (subs
   leave none while under). **Your own ship is always pink**, marked with a
   bobbing red triangle, and every round opens with a 3-second "find your ship"

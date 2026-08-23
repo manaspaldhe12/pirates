@@ -70,6 +70,10 @@ const MG_DURATION = 5; // s of continuous fire
 const DOUBLE_DURATION = 10; // s of firing both sides at once (barrels show on both)
 const SPEED_DURATION = 8; // s of double speed
 const SPEED_MULT = 2;
+const RANGE_DURATION = 10; // s of double cannon range (normal hulls, not torpedoes)
+const RANGE_MULT = 2;
+const DAMAGE_DURATION = 10; // s of double cannon/torpedo damage
+const DAMAGE_MULT = 2;
 // The shield is the only buff you could once bank for a whole match, which
 // rewarded hiding with it. It now runs on a clock like the rest: a short window
 // to go and pick a fight, and a ram shatters it outright.
@@ -139,6 +143,8 @@ const PICKUP_SPAWN: Record<PickupType, [number, number]> = {
   speed: [13, 21],
   double: [17, 27],
   machinegun: [22, 34],
+  range: [16, 25],
+  damage: [18, 28],
 };
 const PICKUP_ORDER = Object.keys(PICKUP_SPAWN) as PickupType[];
 
@@ -148,6 +154,8 @@ const PICKUP_META: Record<PickupType, { icon: string; color: string; label: stri
   speed: { icon: '⚡', color: '#e8c53a', label: '2× SPEED' },
   double: { icon: '⇄', color: '#7bd15f', label: '2× FIRE' },
   machinegun: { icon: '⁘', color: '#e8892a', label: 'RAPID FIRE' },
+  range: { icon: '🎯', color: '#b06fe8', label: '2× RANGE' },
+  damage: { icon: '💥', color: '#c81d47', label: '2× DAMAGE' },
 };
 const ZERO_TIMERS: Record<PickupType, number> = {
   health: 0,
@@ -155,6 +163,8 @@ const ZERO_TIMERS: Record<PickupType, number> = {
   speed: 0,
   double: 0,
   machinegun: 0,
+  range: 0,
+  damage: 0,
 };
 // Camera: on roomy screens the whole arena is letterboxed to fit, as before.
 // Below this fit scale (phones, tiny windows) ships turn thumbnail-sized, so
@@ -267,6 +277,8 @@ interface Buff {
   speedUntil: number;
   mgUntil: number;
   shieldUntil: number; // charges live on the ship; this is when they lapse
+  rangeUntil: number;
+  damageUntil: number;
   mgArmed: boolean; // machine gun picked up, waiting for the next trigger shot
 }
 
@@ -276,6 +288,8 @@ interface BuffView {
   spd: boolean;
   dbl: boolean;
   mg: boolean;
+  rng: boolean;
+  dmg: boolean;
   inv: boolean; // spawn protection
 }
 
@@ -817,8 +831,16 @@ export class MpSession {
     };
     this.spawns.push(spawn);
     this.ships.push(new Ship(spawn.x, spawn.y, spawn.heading, spawn.color, spawn.type));
-    this.buffs.push({ doubleUntil: 0, speedUntil: 0, mgUntil: 0, shieldUntil: 0, mgArmed: false });
-    this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
+    this.buffs.push({
+      doubleUntil: 0,
+      speedUntil: 0,
+      mgUntil: 0,
+      shieldUntil: 0,
+      rangeUntil: 0,
+      damageUntil: 0,
+      mgArmed: false,
+    });
+    this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, rng: false, dmg: false, inv: true });
     this.scores.push({ time: 0, damage: 0, kills: 0 });
     this.scoreView.push({ score: 0, kills: 0 });
     this.ramCd.push(0);
@@ -921,9 +943,19 @@ export class MpSession {
       speedUntil: 0,
       mgUntil: 0,
       shieldUntil: 0,
+      rangeUntil: 0,
+      damageUntil: 0,
       mgArmed: false,
     }));
-    this.buffView = this.spawns.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
+    this.buffView = this.spawns.map(() => ({
+      shield: 0,
+      spd: false,
+      dbl: false,
+      mg: false,
+      rng: false,
+      dmg: false,
+      inv: true,
+    }));
     this.scores = this.spawns.map(() => ({ time: 0, damage: 0, kills: 0 }));
     this.scoreView = this.spawns.map(() => ({ score: 0, kills: 0 }));
     this.ramCd = this.spawns.map(() => 0);
@@ -1028,6 +1060,10 @@ export class MpSession {
       const frozen = this.moveFrozen(i);
       ship.boostFactor =
         this.phase === 'battle' && !frozen && this.buffs[i].speedUntil > this.clock ? SPEED_MULT : 1;
+      ship.rangeFactor =
+        this.phase === 'battle' && !frozen && this.buffs[i].rangeUntil > this.clock ? RANGE_MULT : 1;
+      ship.damageFactor =
+        this.phase === 'battle' && !frozen && this.buffs[i].damageUntil > this.clock ? DAMAGE_MULT : 1;
       const turn: Turn =
         this.phase === 'battle' && this.players[i].connected && !frozen ? this.players[i].turn : 0;
 
@@ -1245,6 +1281,9 @@ export class MpSession {
           shooter.y + fy * along + sy * reach,
           dir,
           shooter,
+          false,
+          shooter.rangeFactor,
+          shooter.damageFactor,
         ),
       );
     }
@@ -1272,6 +1311,8 @@ export class MpSession {
           dir,
           shooter,
           true,
+          1,
+          shooter.damageFactor,
         ),
       );
     }
@@ -1407,7 +1448,15 @@ export class MpSession {
     ship.gunHighlight = false;
     ship.wake = [];
     // A respawn is a clean slate — old power-ups don't carry over.
-    this.buffs[i] = { doubleUntil: 0, speedUntil: 0, mgUntil: 0, shieldUntil: 0, mgArmed: false };
+    this.buffs[i] = {
+      doubleUntil: 0,
+      speedUntil: 0,
+      mgUntil: 0,
+      shieldUntil: 0,
+      rangeUntil: 0,
+      damageUntil: 0,
+      mgArmed: false,
+    };
     this.diveCharge[i] = DIVE_MAX;
     this.mag[i] = this.magCap[i]; // fresh magazine, nothing reloading
     this.reloadT[i] = 0;
@@ -1600,6 +1649,12 @@ export class MpSession {
       case 'machinegun':
         b.mgArmed = true;
         break;
+      case 'range':
+        b.rangeUntil = this.clock + RANGE_DURATION;
+        break;
+      case 'damage':
+        b.damageUntil = this.clock + DAMAGE_DURATION;
+        break;
     }
   }
 
@@ -1613,6 +1668,8 @@ export class MpSession {
         spd: b.speedUntil > this.clock,
         dbl: b.doubleUntil > this.clock,
         mg: b.mgUntil > this.clock,
+        rng: b.rangeUntil > this.clock,
+        dmg: b.damageUntil > this.clock,
         inv: this.spawnUntil[i] > this.clock,
       };
       const sc = this.scores[i];
@@ -1668,6 +1725,8 @@ export class MpSession {
         spd: this.buffView[i]?.spd ?? false,
         dbl: this.buffView[i]?.dbl ?? false,
         mg: this.buffView[i]?.mg ?? false,
+        rng: this.buffView[i]?.rng ?? false,
+        dmg: this.buffView[i]?.dmg ?? false,
         inv: this.buffView[i]?.inv ?? false,
         depth: s.depth,
         charge: this.diveCharge[i] / DIVE_MAX,
@@ -1736,6 +1795,8 @@ export class MpSession {
           spd: false,
           dbl: false,
           mg: false,
+          rng: false,
+          dmg: false,
           inv: true,
           depth: 0,
           charge: 1,
@@ -1744,7 +1805,15 @@ export class MpSession {
           ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
           rl: 0,
         }));
-        this.buffView = msg.ships.map(() => ({ shield: 0, spd: false, dbl: false, mg: false, inv: true }));
+        this.buffView = msg.ships.map(() => ({
+          shield: 0,
+          spd: false,
+          dbl: false,
+          mg: false,
+          rng: false,
+          dmg: false,
+          inv: true,
+        }));
         this.scoreView = msg.ships.map(() => ({ score: 0, kills: 0 }));
         this.guestCharge = msg.ships.map(() => 1);
         this.eyeR = EYE_MAX;
@@ -1778,6 +1847,8 @@ export class MpSession {
             spd: false,
             dbl: false,
             mg: false,
+            rng: false,
+            dmg: false,
             inv: true,
             depth: 0,
             charge: 1,
@@ -1786,7 +1857,15 @@ export class MpSession {
             ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
             rl: 0,
           });
-          this.buffView.push({ shield: 0, spd: false, dbl: false, mg: false, inv: true });
+          this.buffView.push({
+            shield: 0,
+            spd: false,
+            dbl: false,
+            mg: false,
+            rng: false,
+            dmg: false,
+            inv: true,
+          });
           this.scoreView.push({ score: 0, kills: 0 });
           this.guestCharge.push(1);
         }
@@ -1867,7 +1946,15 @@ export class MpSession {
       ship.shield = t.shield;
       ship.depth = t.depth;
       this.guestCharge[i] = t.charge;
-      this.buffView[i] = { shield: t.shield, spd: t.spd, dbl: t.dbl, mg: t.mg, inv: t.inv };
+      this.buffView[i] = {
+        shield: t.shield,
+        spd: t.spd,
+        dbl: t.dbl,
+        mg: t.mg,
+        rng: t.rng,
+        dmg: t.dmg,
+        inv: t.inv,
+      };
       this.scoreView[i] = { score: t.score, kills: t.kills };
     });
 
@@ -2308,6 +2395,8 @@ export class MpSession {
     if (v.spd) tags.push('2×SPD');
     if (v.dbl) tags.push('DBL');
     if (v.mg) tags.push('RAPID');
+    if (v.rng) tags.push('2×RNG');
+    if (v.dmg) tags.push('2×DMG');
     if (v.shield > 0) tags.push(`SHLD${v.shield}`);
     if (!tags.length) return;
 
