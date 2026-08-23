@@ -82,6 +82,9 @@ starts the battle once 2–11 captains are in.
   pickups, and a dive-charge meter limits your time under (refills on the
   surface). Islands still sink you; the maelstrom still pulls you. Power-ups
   adapt: Double gives a torpedo spread, Rapid Fire a torpedo stream.
+- **Braking** — hold **↓/S** to stop dead (you can still turn) and let go to
+  sail on again; every hull but the submarine has it, since that key is
+  already spoken for underwater.
 - **Wakes & you-marker** — every ship leaves a fading wake as it sails (subs
   leave none while under). **Your own ship is always pink**, marked with a
   bobbing red triangle, and every round opens with a 3-second "find your ship"
@@ -126,15 +129,18 @@ starts the battle once 2–11 captains are in.
 | `1`–`3`, or `4` for random | Choose the enemy's ship |
 | `1` / `2` / `3` | Choose difficulty (easy / medium / hard) |
 | `←` / `→` or `A` / `D` | Steer left / right |
+| `↓` or `S` | Brake — hold to kill forward way, release to sail on (submarine dives instead) |
 | `Space` | Fire a broadside |
 | `R` | After a battle ends, return to ship select |
 
 Your ship is always under sail and moves forward on its own — you only steer,
-just like in the original Pirates!. Cannons fire a broadside from whichever
-side of your hull faces the enemy, and the balls fly **perpendicular to your
-heading**, so you have to maneuver to bring your guns to bear. The enemy
-captain does the same: it chases you from a distance, then turns sideways to
-line up its own broadside.
+just like in the original Pirates!. Hold **↓/S to brake**: you stop dead (you
+can still turn in place) for as long as you hold it, then pick up sail again
+the instant you let go — handy for lining up a shot or avoiding overrunning a
+turn. Cannons fire a broadside from whichever side of your hull faces the
+enemy, and the balls fly **perpendicular to your heading**, so you have to
+maneuver to bring your guns to bear. The enemy captain does the same: it
+chases you from a distance, then turns sideways to line up its own broadside.
 
 The wind matters too. The arrow in the top-left shows the wind direction, and
 your speed depends on your angle to it: sailing perpendicular to the wind

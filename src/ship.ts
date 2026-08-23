@@ -128,7 +128,7 @@ export class Ship {
     this.health = Math.max(0, this.health - amount);
   }
 
-  update(dt: number, turn: Turn, worldW: number, worldH: number, speedFactor = 1) {
+  update(dt: number, turn: Turn, worldW: number, worldH: number, speedFactor = 1, braking = false) {
     this.reload = Math.max(0, this.reload - dt);
 
     if (!this.alive) {
@@ -136,8 +136,9 @@ export class Ship {
       return;
     }
 
+    // Braking kills forward way but not the helm — you can still turn in place.
     this.heading += turn * this.turnRate * dt;
-    const v = this.speed * speedFactor * this.boostFactor;
+    const v = braking ? 0 : this.speed * speedFactor * this.boostFactor;
     this.x += Math.cos(this.heading) * v * dt;
     this.y += Math.sin(this.heading) * v * dt;
 

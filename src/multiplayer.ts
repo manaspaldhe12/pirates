@@ -1041,10 +1041,19 @@ export class MpSession {
         else if (ship.depth === 0) this.diveCharge[i] = Math.min(DIVE_MAX, this.diveCharge[i] + DIVE_REFILL * dt);
       }
 
+      // Braking: on any hull but the submarine (which already holds ↓/S for
+      // diving), the same key kills forward way while held.
+      const braking =
+        ship.type !== 'submarine' &&
+        !frozen &&
+        this.phase === 'battle' &&
+        this.players[i].connected &&
+        this.players[i].dive;
+
       // Submarines are engine-powered — the wind never touches them. A frozen
       // ship has zero drive, so it stays put where it respawned.
       const sf = frozen ? 0 : ship.type === 'submarine' ? 1 : this.wind.speedFactor(ship.heading);
-      ship.update(dt, turn, this.worldW, this.worldH, sf);
+      ship.update(dt, turn, this.worldW, this.worldH, sf, braking);
       // Running aground is fatal — islands are obstacles, not bumpers.
       // (Spawn-protected ships are unsinkable for their grace period.)
       if (ship.alive && this.spawnUntil[i] <= this.clock && shipHitsIsland(this.islands, ship)) {
