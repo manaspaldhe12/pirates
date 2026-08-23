@@ -24,7 +24,8 @@ A fourth choice, **🎲 I'm Feeling Lucky**, skips every question: it rolls a
 whole Bots Arena — win condition, hull, fleet size — and sails on the spot.
 
 - **Practice** — a 1v1 duel or endless Survivor waves against the bot AI, with
-  your hull, the enemy hull and the difficulty up to you.
+  your hull, the enemy hull and the difficulty up to you. Power-ups (below)
+  spawn here too, and the enemy can grab them just as you can.
 - **Bots Arena** — a free-for-all against **5, 10, or 15 bots**. Pick the win
   condition and your ship and it sails immediately: no room code, no lobby.
 - **Play with Friends** — see below.
@@ -54,8 +55,9 @@ starts the battle once 2–11 captains are in.
   a boosted or Large ship is a battering ram. Glancing scrapes just shove ships
   apart; the rammer only takes ~10% back. Bots seek rams when they hold the
   advantage. (Knockback never pushes a ship onto a lethal island.)
-- **Power-ups** — bounties bob in the water (often just off an island's lethal
-  shore, so grabbing them is a risk): **❤️ Health** (+1 hp, common),
+- **Power-ups** — shared with Practice mode, minus the host/guest sync.
+  Bounties bob in the water (often just off an island's lethal shore in
+  multiplayer, so grabbing them is a risk): **❤️ Health** (+1 hp, common),
   **🛡️ Shield** (soak the next 5 hits), **⚡ Speed** (double speed), **↔️ Double**
   (fire both broadsides at once), **Machine-gun** (your next shot opens
   5 s of rapid continuous fire), **🎯 Range** (double cannon range for a
