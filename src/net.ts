@@ -34,7 +34,7 @@ export interface ShipSpawn {
   heading: number;
 }
 
-export type PickupType = 'health' | 'shield' | 'speed' | 'double' | 'machinegun';
+export type PickupType = 'health' | 'shield' | 'speed' | 'double' | 'machinegun' | 'range' | 'damage';
 
 export interface PickupState {
   t: PickupType;
@@ -52,6 +52,8 @@ export interface ShipState {
   spd: boolean; // speed boost active
   dbl: boolean; // double-broadside active
   mg: boolean; // machine-gun active
+  rng: boolean; // 2× cannon range active
+  dmg: boolean; // 2× cannon damage active
   inv: boolean; // spawn-protection (invulnerable) active
   depth: number; // submarine: 0 surfaced → 1 fully submerged
   charge: number; // submarine dive charge, 0..1

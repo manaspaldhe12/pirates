@@ -87,6 +87,8 @@ export class Ship {
   sinkProgress = 0; // 0 afloat → 1 fully sunk
   shield = 0; // remaining shield hits that will be absorbed (multiplayer power-up)
   boostFactor = 1; // speed multiplier from the speed power-up
+  rangeFactor = 1; // cannon range multiplier from the range power-up
+  damageFactor = 1; // cannon damage multiplier from the damage power-up
   depth = 0; // submarine: 0 surfaced → 1 fully submerged
   /** Fading wake behind the hull; purely visual, maintained by the renderer. */
   wake: Array<{ x: number; y: number; t: number }> = [];

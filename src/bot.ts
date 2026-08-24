@@ -77,6 +77,13 @@ function pickupUtility(
       return buffs.dbl || wounded ? 0 : survival ? 0.4 : 1.7;
     case 'machinegun':
       return buffs.mg || wounded ? 0 : survival ? 0.4 : 2.1;
+    case 'range':
+      // Torpedoes already run the length of the map — the boost is dead
+      // weight for a submarine.
+      if (self.type === 'submarine') return 0;
+      return self.rangeFactor > 1 || wounded ? 0 : survival ? 0.4 : 1.6;
+    case 'damage':
+      return self.damageFactor > 1 || wounded ? 0 : survival ? 0.4 : 1.8;
   }
 }
 

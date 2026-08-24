@@ -23,13 +23,21 @@ export class Cannonball {
   private readonly baseDamage: number;
   private traveled = 0;
 
-  constructor(x: number, y: number, direction: number, owner: Ship, torpedo = false) {
+  constructor(
+    x: number,
+    y: number,
+    direction: number,
+    owner: Ship,
+    torpedo = false,
+    rangeMult = 1,
+    damageMult = 1,
+  ) {
     this.x = x;
     this.y = y;
     this.torpedo = torpedo;
     this.speed = torpedo ? TORPEDO_SPEED : CANNONBALL_SPEED;
-    this.range = torpedo ? TORPEDO_RANGE : MAX_RANGE;
-    this.baseDamage = torpedo ? TORPEDO_DAMAGE : 1;
+    this.range = (torpedo ? TORPEDO_RANGE : MAX_RANGE) * rangeMult;
+    this.baseDamage = (torpedo ? TORPEDO_DAMAGE : 1) * damageMult;
     this.vx = Math.cos(direction) * this.speed;
     this.vy = Math.sin(direction) * this.speed;
     this.owner = owner;
