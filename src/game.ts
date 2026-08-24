@@ -358,9 +358,16 @@ export class Game {
     this.tickBuff(this.player, this.playerBuff, dt);
     this.tickBuff(this.enemy, this.enemyBuff, dt);
 
+    // Braking: on any hull but the submarine (which already holds ↓/S for
+    // diving), the same key kills forward way while held.
+    const playerBraking =
+      this.player.type !== 'submarine' &&
+      !this.over &&
+      (this.input.isDown('ArrowDown') || this.input.isDown('KeyS'));
+
     // Submarines run on engines — the wind never touches them.
     const psf = this.player.type === 'submarine' ? 1 : this.wind.speedFactor(this.player.heading);
-    this.player.update(dt, turn, w, h, psf);
+    this.player.update(dt, turn, w, h, psf, playerBraking);
     this.enemy.update(
       dt,
       // The enemy captain can't see (or chase) a submerged player.
