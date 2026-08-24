@@ -6,7 +6,7 @@
 import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
 import type { IslandData } from './island';
-import type { ShipTypeName, Turn } from './ship';
+import type { ShipTypeName, Team, Turn } from './ship';
 
 const ID_PREFIX = 'pirates-nvc1-';
 // No 0/O/1/I/L — codes get read aloud.
@@ -32,6 +32,7 @@ export interface ShipSpawn {
   x: number;
   y: number;
   heading: number;
+  team: Team | null; // null outside Team Mode
 }
 
 export type PickupType = 'health' | 'shield' | 'speed' | 'double' | 'machinegun' | 'range' | 'damage';
@@ -91,10 +92,20 @@ export type C2HMsg =
 /** Host → guest. */
 export type H2CMsg =
   | { t: 'reject'; reason: string }
-  | { t: 'lobby'; players: LobbyPlayerInfo[]; you: number; mode: MpMode }
+  | { t: 'lobby'; players: LobbyPlayerInfo[]; you: number; mode: MpMode; teams: boolean; friendlyFire: boolean }
   // w/h: arena dimensions for this battle (the host shapes the sea to its own
   // window; guests mirror so everyone plays the exact same world).
-  | { t: 'start'; islands: IslandData[]; ships: ShipSpawn[]; you: number; mode: MpMode; w: number; h: number }
+  | {
+      t: 'start';
+      islands: IslandData[];
+      ships: ShipSpawn[];
+      you: number;
+      mode: MpMode;
+      w: number;
+      h: number;
+      teams: boolean;
+      friendlyFire: boolean;
+    }
   // Mid-battle roster growth: a captain joined late; existing clients extend
   // their ship lists in place (indices never shrink or reorder mid-round).
   | { t: 'roster'; ships: ShipSpawn[] }

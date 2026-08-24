@@ -161,6 +161,19 @@
             (up to 21 captains). Everyone spawns scattered under a 2s golden spawn shield.
             If you sink, the round ends — you never spectate bots.
           </p>
+
+          <h2>🔴🔵 Team Mode</h2>
+          <p>
+            Toggle it in the lobby (Play with Friends only) for two random
+            <b>Red vs Blue</b> crews instead of a free-for-all — rebalanced fresh every
+            round, Blue mustering a third of the way in from the left, Red a third of
+            the way in from the right, facing off across the water. Hull color now
+            shows your team, so your own ship gets a <b>golden ring</b> instead of the
+            usual pink repaint. A <b>Friendly Fire</b> toggle sits right below it
+            (off by default) — off, shots and rams pass harmlessly through
+            teammates; on, mind your broadsides. Bots on your side never target,
+            rake, ram, or flee from you.
+          </p>
         </div>
         <div class="modal-footer">
           <button id="rules-close">Close</button>
@@ -265,6 +278,12 @@
 
           <div class="section-label">Battle mode — host picks</div>
           <div class="card-row" id="lobby-mode-cards"></div>
+
+          <div class="section-label">Team mode — host picks</div>
+          <div class="card-row" id="lobby-teams-cards"></div>
+
+          <div class="section-label">Friendly fire — team mode only</div>
+          <div class="card-row" id="lobby-ff-cards"></div>
 
           <div class="section-label">Ships</div>
           <div id="lobby-players" class="lobby-players"></div>

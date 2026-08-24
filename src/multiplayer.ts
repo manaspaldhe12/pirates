@@ -34,7 +34,7 @@ import {
   type ShipSpawn,
   type ShipState,
 } from './net';
-import { DIVE, gunOffsets, muzzleReach, RAM, SAIL_TYPES, Ship, SHIP_TYPES, wrapDelta, YOU_COLOR, type ShipTypeName, type Turn } from './ship';
+import { DIVE, gunOffsets, muzzleReach, RAM, SAIL_TYPES, Ship, SHIP_TYPES, wrapDelta, YOU_COLOR, type ShipTypeName, type Team, type Turn } from './ship';
 import type { GameSounds } from './sounds';
 import { drawThreatArc, haptic, incomingThreats, TouchControls, touchActive, turnToward } from './touchui';
 import { Wind } from './wind';
@@ -257,6 +257,52 @@ function spawnRing(worldW: number, worldH: number): Array<{ x: number; y: number
   });
 }
 
+// ── Team Mode ────────────────────────────────────────────────────────────────
+export const TEAM_COLORS: Record<Team, string> = {
+  blue: '#3f8ee8',
+  red: '#e14b3f',
+};
+
+/** A random even split (±1) — shuffled, not seat-order alternating. */
+function assignTeams(n: number): Team[] {
+  const teams: Team[] = Array.from({ length: n }, (_, i) => (i % 2 === 0 ? 'blue' : 'red'));
+  for (let i = teams.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [teams[i], teams[j]] = [teams[j], teams[i]];
+  }
+  return teams;
+}
+
+// Blue musters a third of the way in from the left edge, Red a third of the
+// way in from the right — the two lines face each other across open water,
+// with the islands (generated to dodge these same points) between them.
+const TEAM_X_FRAC: Record<Team, number> = { blue: 1 / 3, red: 2 / 3 };
+
+/** Spawn points for a battle roster once teams are assigned: each side lines
+ *  up on its own third of the map, spread evenly top to bottom, facing the
+ *  opposing line (with a little heading jitter so it's not a dead-straight
+ *  wall of bows). */
+function teamSpawnPoints(
+  worldW: number,
+  worldH: number,
+  teams: Team[],
+): Array<{ x: number; y: number; heading: number }> {
+  const counts: Record<Team, number> = {
+    blue: teams.filter((t) => t === 'blue').length,
+    red: teams.filter((t) => t === 'red').length,
+  };
+  const seen: Record<Team, number> = { blue: 0, red: 0 };
+  const margin = worldH * 0.15;
+  return teams.map((team) => {
+    const slot = seen[team]++;
+    const count = counts[team];
+    const x = worldW * TEAM_X_FRAC[team];
+    const y = count > 1 ? margin + (slot / (count - 1)) * (worldH - margin * 2) : worldH / 2;
+    const heading = (team === 'blue' ? 0 : Math.PI) + (Math.random() - 0.5) * 0.6;
+    return { x, y, heading };
+  });
+}
+
 interface Wave {
   x: number;
   y: number;
@@ -426,6 +472,8 @@ export class MpSession {
   private eyeR = EYE_MAX; // whirlpool eye radius (host computes, guest mirrors)
   private freeze = 0; // start-of-round locate-your-ship pause (host computes, guest mirrors)
   private mode: MpMode = 'score'; // win condition (host picks in the lobby, guest mirrors)
+  private teamsEnabled = false; // Team Mode toggle (host picks in the lobby, guest mirrors)
+  private friendlyFire = false; // only meaningful with teamsEnabled (host picks, guest mirrors)
   private wind = new Wind();
   private explosions: Explosion[] = [];
   private splashes: Splash[] = [];
@@ -647,6 +695,30 @@ export class MpSession {
     return this.mode;
   }
 
+  /** Host only: toggle Team Mode — two random Red/Blue crews, assigned fresh
+   *  each time the battle starts. */
+  setTeams(enabled: boolean) {
+    if (!this.isHost || this.phase !== 'lobby') return;
+    this.teamsEnabled = enabled;
+    this.pushLobby();
+  }
+
+  /** Host only: whether teammates can damage each other (Team Mode only). */
+  setFriendlyFire(enabled: boolean) {
+    if (!this.isHost || this.phase !== 'lobby') return;
+    this.friendlyFire = enabled;
+    this.pushLobby();
+  }
+
+  /** For UI copy. */
+  get teamsOn(): boolean {
+    return this.teamsEnabled;
+  }
+
+  get friendlyFireOn(): boolean {
+    return this.friendlyFire;
+  }
+
   /** Host only: launch the battle (needs 2+ players; ready is not required). */
   startBattle() {
     if (!this.isHost || this.phase !== 'lobby' || !this.canStart()) return;
@@ -820,17 +892,23 @@ export class MpSession {
     this.players.push(player);
     const i = this.players.length - 1;
 
+    // Team Mode: join whichever side is currently short-handed (ties broken
+    // randomly) — the spawn line-up is a round-start thing, so a late joiner
+    // just surfaces via the normal mid-map respawn spot instead.
+    const team = this.teamsEnabled ? this.smallerTeam() : null;
     const spot = this.pickRespawnSpot(SHIP_TYPES[player.ship].width);
     const spawn: ShipSpawn = {
       name: player.name,
       type: player.ship,
-      color: crewColor(i, this.players),
+      color: team ? TEAM_COLORS[team] : crewColor(i, this.players),
       x: spot.x,
       y: spot.y,
       heading: this.pickClearHeading(spot.x, spot.y),
+      team,
     };
     this.spawns.push(spawn);
     this.ships.push(new Ship(spawn.x, spawn.y, spawn.heading, spawn.color, spawn.type));
+    this.ships[i].team = team;
     this.buffs.push({
       doubleUntil: 0,
       speedUntil: 0,
@@ -866,7 +944,18 @@ export class MpSession {
       mode: this.mode,
       w: this.worldW,
       h: this.worldH,
+      teams: this.teamsEnabled,
+      friendlyFire: this.friendlyFire,
     } satisfies H2CMsg);
+  }
+
+  /** Team Mode: the side with fewer ships afloat right now (ties broken
+   *  randomly) — where a late joiner musters in. */
+  private smallerTeam(): Team {
+    const blue = this.ships.filter((s) => s.team === 'blue').length;
+    const red = this.ships.filter((s) => s.team === 'red').length;
+    if (blue === red) return Math.random() < 0.5 ? 'blue' : 'red';
+    return blue < red ? 'blue' : 'red';
   }
 
   // Ready is a courtesy signal ("done picking my ship"), not a gate — one idle
@@ -884,7 +973,15 @@ export class MpSession {
       bot: p.bot,
     }));
     this.players.forEach((p, i) => {
-      if (p.conn?.open) p.conn.send({ t: 'lobby', players: info, you: i, mode: this.mode } satisfies H2CMsg);
+      if (p.conn?.open)
+        p.conn.send({
+          t: 'lobby',
+          players: info,
+          you: i,
+          mode: this.mode,
+          teams: this.teamsEnabled,
+          friendlyFire: this.friendlyFire,
+        } satisfies H2CMsg);
     });
     this.cb.onLobby(info, 0, this.canStart(), this.mode);
   }
@@ -908,23 +1005,33 @@ export class MpSession {
     this.worldW = Math.round(Math.sqrt(WORLD_AREA * aspect));
     this.worldH = Math.round(WORLD_AREA / this.worldW);
     this.scatterWaves();
+    // Team Mode: a fresh random Red/Blue split every round, lined up on their
+    // own third of the map facing the other side. Otherwise the usual ring,
+    // everyone scattered to face the melee at the center.
+    const teams = this.teamsEnabled ? assignTeams(this.players.length) : null;
+    const teamSpots = teams ? teamSpawnPoints(this.worldW, this.worldH, teams) : null;
     const ring = spawnRing(this.worldW, this.worldH);
+    const spots = teamSpots ?? ring;
     this.spawns = this.players.map((p, i) => {
-      const s = ring[i];
+      const team = teams?.[i] ?? null;
       return {
         name: p.name,
         type: p.ship,
-        color: crewColor(i, this.players),
-        x: s.x,
-        y: s.y,
-        // Random heading — everyone scatters a different way. A 2 s spawn shield
-        // (below) keeps them safe while they sort themselves out.
-        heading: Math.random() * Math.PI * 2,
+        color: team ? TEAM_COLORS[team] : crewColor(i, this.players),
+        x: spots[i].x,
+        y: spots[i].y,
+        // Free-for-all: random heading, everyone scatters a different way.
+        // Team Mode: teamSpawnPoints already faces each line at the other.
+        heading: teamSpots ? teamSpots[i].heading : Math.random() * Math.PI * 2,
+        team,
       };
     });
-    this.islands = generateIslands(this.worldW, this.worldH, ring.slice(0, this.players.length));
+    this.islands = generateIslands(this.worldW, this.worldH, spots.slice(0, this.players.length));
     this.ships = this.spawns.map((sp) => new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type));
-    this.ships[0].hullColor = YOU_COLOR; // your own hull is always pink (host is idx 0)
+    this.ships.forEach((ship, i) => (ship.team = this.spawns[i].team));
+    // Your own hull is always pink — except in Team Mode, where hull color
+    // carries team allegiance instead and a golden ring marks you (see render).
+    if (!this.teamsEnabled) this.ships[0].hullColor = YOU_COLOR; // host is idx 0
     this.freeze = START_FREEZE;
     this.balls = [];
     this.explosions = [];
@@ -991,6 +1098,8 @@ export class MpSession {
           mode: this.mode,
           w: this.worldW,
           h: this.worldH,
+          teams: this.teamsEnabled,
+          friendlyFire: this.friendlyFire,
         } satisfies H2CMsg);
       }
     });
@@ -1186,6 +1295,8 @@ export class MpSession {
       if (ball.spent || this.phase !== 'battle') continue;
       for (const ship of this.ships) {
         if (ship === ball.owner || !ship.alive) continue;
+        // Friendly fire off: shots fly straight through a teammate's hull.
+        if (!this.friendlyFire && ship.team !== null && ship.team === ball.owner.team) continue;
         if (ship.depth > SUB_IMMUNE) continue; // shots pass over a submerged sub
         if (ship.containsPointWrapped(ball.x, ball.y, this.worldW, this.worldH)) {
           ball.spent = true;
@@ -1403,6 +1514,9 @@ export class MpSession {
   private applyRam(ai: number, vi: number, dmg: number, selfDmg: number): boolean {
     const attacker = this.ships[ai];
     const victim = this.ships[vi];
+    // Friendly fire off: bump each other apart (already done by the caller),
+    // but no ram damage between teammates.
+    if (!this.friendlyFire && attacker.team !== null && attacker.team === victim.team) return false;
     if (this.spawnUntil[vi] > this.clock) return false; // spawn-protected
     if (victim.shield > 0) {
       // A ram is the hard counter: the shield stops this one, then shatters —
@@ -1773,6 +1887,8 @@ export class MpSession {
         }
         this.you = msg.you;
         this.mode = msg.mode;
+        this.teamsEnabled = msg.teams;
+        this.friendlyFire = msg.friendlyFire;
         this.cb.onLobby(msg.players, msg.you, false, msg.mode);
         break;
 
@@ -1790,8 +1906,16 @@ export class MpSession {
         this.spawns = msg.ships;
         this.you = msg.you;
         this.mode = msg.mode;
-        this.ships = msg.ships.map((sp) => new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type));
-        this.ships[this.you].hullColor = YOU_COLOR; // your own hull is always pink
+        this.teamsEnabled = msg.teams;
+        this.friendlyFire = msg.friendlyFire;
+        this.ships = msg.ships.map((sp) => {
+          const s = new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type);
+          s.team = sp.team;
+          return s;
+        });
+        // Your own hull is always pink — except in Team Mode, where hull color
+        // carries team allegiance instead and a golden ring marks you (see render).
+        if (!this.teamsEnabled) this.ships[this.you].hullColor = YOU_COLOR;
         this.freeze = START_FREEZE;
         this.timeLeft = msg.mode === 'score' ? MATCH_DURATION : -1;
         this.targets = msg.ships.map((sp) => ({
@@ -1845,7 +1969,9 @@ export class MpSession {
         if (this.phase !== 'battle') break;
         for (let i = this.ships.length; i < msg.ships.length; i++) {
           const sp = msg.ships[i];
-          this.ships.push(new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type));
+          const newShip = new Ship(sp.x, sp.y, sp.heading, sp.color, sp.type);
+          newShip.team = sp.team;
+          this.ships.push(newShip);
           this.targets.push({
             x: sp.x,
             y: sp.y,
@@ -2233,6 +2359,9 @@ export class MpSession {
       // A submerged submarine is invisible to everyone but its own captain.
       if (i !== this.you && ship.depth > SUB_HIDDEN) return;
       if (ship.sinkProgress < 1) this.drawShipBuffs(ship, i); // aura under the hull
+      // Team Mode: hull color carries team allegiance, so a golden ring is
+      // how you spot your own ship instead of the usual pink repaint.
+      if (i === this.you && this.teamsEnabled && ship.sinkProgress < 1) this.drawYouRing(ship);
       ship.gunHighlight = this.buffView[i]?.dbl ?? false; // gold guns during double
       ship.drawWrapped(ctx, this.worldW, this.worldH); // ghost across edges = seamless wrap
       if (ship.sinkProgress < 1) {
@@ -2449,6 +2578,21 @@ export class MpSession {
       ctx.fillStyle = `rgba(255, 255, 255, ${(1 - age) * 0.28})`;
       ctx.fill();
     }
+  }
+
+  /** Team Mode: a golden ring around your own hull — the pink repaint is off
+   *  in this mode (hull color carries team allegiance), so this is how you
+   *  find yourself. Drawn as a halo under the hull, like the shield aura. */
+  private drawYouRing(ship: Ship) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalAlpha = (1 - ship.sinkProgress) * (0.75 + 0.25 * Math.sin(performance.now() / 220));
+    ctx.strokeStyle = '#ffd75e';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(ship.x, ship.y, ship.length * 0.65, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** A small bobbing red triangle above your own ship so you always find yourself. */

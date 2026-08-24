@@ -541,6 +541,30 @@ mpModeOptions.forEach(({ key, label, stat }) => {
   lobbyModeRow.appendChild(card);
 });
 
+// Team Mode toggle — two random Red/Blue crews instead of a free-for-all.
+const teamToggleOptions: Array<{ key: 'off' | 'on'; label: string; stat: string }> = [
+  { key: 'off', label: 'Off', stat: 'free-for-all' },
+  { key: 'on', label: 'On', stat: 'random Red vs Blue' },
+];
+const lobbyTeamsRow = document.getElementById('lobby-teams-cards')!;
+teamToggleOptions.forEach(({ key, label, stat }) => {
+  const card = makeCard(label, stat, key);
+  card.addEventListener('click', () => mp?.setTeams(key === 'on')); // no-op for guests
+  lobbyTeamsRow.appendChild(card);
+});
+
+// Friendly fire toggle — only meaningful with Team Mode on.
+const ffToggleOptions: Array<{ key: 'off' | 'on'; label: string; stat: string }> = [
+  { key: 'off', label: 'Off', stat: "teammates can't hurt you" },
+  { key: 'on', label: 'On', stat: 'watch your broadsides' },
+];
+const lobbyFfRow = document.getElementById('lobby-ff-cards')!;
+ffToggleOptions.forEach(({ key, label, stat }) => {
+  const card = makeCard(label, stat, key);
+  card.addEventListener('click', () => mp?.setFriendlyFire(key === 'on')); // no-op for guests
+  lobbyFfRow.appendChild(card);
+});
+
 // Ship cards inside the lobby — each captain picks their own boat.
 (Object.keys(SHIP_TYPES) as ShipTypeName[]).forEach((type) => {
   const card = makeCard(titleCase(type), shipStat(type), type);
@@ -557,6 +581,11 @@ function renderLobby(players: LobbyPlayerInfo[], you: number, canStart: boolean,
   // — and a permanent "connecting…" would just look broken.
   roomCodeBlock.classList.toggle('hidden', arenaBots !== null);
   selectCard(lobbyModeRow, mode);
+  const teamsOn = mp?.teamsOn ?? false;
+  selectCard(lobbyTeamsRow, teamsOn ? 'on' : 'off');
+  selectCard(lobbyFfRow, (mp?.friendlyFireOn ?? false) ? 'on' : 'off');
+  // Friendly fire only means anything with Team Mode on.
+  lobbyFfRow.querySelectorAll('.card').forEach((c) => c.classList.toggle('disabled', !teamsOn));
   lobbyPlayersEl.innerHTML = '';
   players.forEach((p, i) => {
     const row = document.createElement('div');

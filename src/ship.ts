@@ -26,8 +26,13 @@ export type ShipTypeName = keyof typeof SHIP_TYPES;
 /** The classic sailing hulls — what enemy AI and bots choose from. */
 export const SAIL_TYPES: ShipTypeName[] = ['small', 'medium', 'large'];
 
-/** Your own hull is always this pink, so you can spot yourself instantly. */
+/** Your own hull is always this pink, so you can spot yourself instantly —
+ *  outside Team Mode, where hull color carries team allegiance instead (see
+ *  Team, below), and a golden ring marks your own ship instead. */
 export const YOU_COLOR = '#ff4fa0';
+
+/** Team Mode crew: two sides, assigned randomly at battle start. */
+export type Team = 'red' | 'blue';
 
 /** Submarine dive tuning, shared by practice (game.ts) and multiplayer. */
 export const DIVE = {
@@ -90,6 +95,8 @@ export class Ship {
   rangeFactor = 1; // cannon range multiplier from the range power-up
   damageFactor = 1; // cannon damage multiplier from the damage power-up
   depth = 0; // submarine: 0 surfaced → 1 fully submerged
+  /** Team Mode allegiance; null outside Team Mode (multiplayer only). */
+  team: Team | null = null;
   /** Fading wake behind the hull; purely visual, maintained by the renderer. */
   wake: Array<{ x: number; y: number; t: number }> = [];
   /** Renderer hint: double-broadside power-up active — gun stubs appear on
