@@ -48,6 +48,7 @@ game.onHit = (youWereHit: boolean) => {
     sounds.myHit();
   }
 };
+game.onPickup = () => sounds.pickup();
 game.start();
 // Dev-only hook so E2E tests can observe practice mode; stripped in prod.
 if (import.meta.env.DEV) (window as unknown as { __game: Game }).__game = game;
