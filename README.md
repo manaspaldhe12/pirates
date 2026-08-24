@@ -82,10 +82,23 @@ starts the battle once 2–11 captains are in.
   pickups, and a dive-charge meter limits your time under (refills on the
   surface). Islands still sink you; the maelstrom still pulls you. Power-ups
   adapt: Double gives a torpedo spread, Rapid Fire a torpedo stream.
+- **Team Mode** — an off/on toggle the host sets in the lobby (Play with
+  Friends only). On, every captain is split into two **random Red/Blue crews**
+  (rebalanced fresh each round) instead of a free-for-all: **Blue musters a
+  third of the way in from the left edge, Red a third of the way in from the
+  right**, each side lined up facing the other across the water. Hull color
+  now shows allegiance, so the usual pink self-repaint is off — instead
+  **your own ship carries a golden ring**. A **Friendly Fire** toggle sits
+  right below it (off by default): off, cannonballs and rams simply pass
+  through teammates; on, watch your broadsides. Bots never target, rake, ram,
+  or flee from their own side. Scoring, win conditions, and respawns are
+  unchanged — Team Mode only changes who can hurt whom and how the crew lines
+  up, not how a match is won.
 - **Wakes & you-marker** — every ship leaves a fading wake as it sails (subs
   leave none while under). **Your own ship is always pink**, marked with a
   bobbing red triangle, and every round opens with a 3-second "find your ship"
-  pause before anyone can move or fire.
+  pause before anyone can move or fire. (Team Mode replaces the pink hull with
+  a golden ring — see above — but keeps the bobbing triangle.)
 - **How to play** — the ❓ button (top-left) opens a full rules reference:
   wind, combat, islands, ramming, power-ups, submarine, maelstrom, scoring.
 - **Bots** — no friends online? **Bots Arena** on the opening screen is the
