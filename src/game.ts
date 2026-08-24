@@ -36,7 +36,7 @@ const DAMAGE_DURATION = 10; // s of double cannon damage
 const DAMAGE_MULT = 2;
 const SHIELD_HITS = 4; // incoming shots absorbed before it breaks
 const SHIELD_DURATION = 7; // s before it lapses
-const MAX_PICKUPS = 3; // just two hulls here — no need to crowd the water
+const MAX_PICKUPS = 7; // hard ceiling on bounties afloat at once, everywhere
 const PICKUP_TTL = 20; // s before an uncollected pickup relocates
 const PICKUP_R = 15; // px
 
