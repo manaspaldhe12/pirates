@@ -43,6 +43,10 @@ export const DIVE = {
   hidden: 0.5, // depth beyond which enemies can't see you
 } as const;
 
+/** Seconds a hull takes to haul up from full sail to a dead stop under the
+ *  brake — and the same again to get back up to speed once it's released. */
+const BRAKE_RAMP = 1;
+
 /** Ramming tuning, shared by practice (game.ts) and multiplayer: you must hit
  *  with your BOW (the whole curved front counts). Bow into an enemy's side or
  *  stern deals `dmg` and costs the rammer `selfDmg` in return; bow-to-bow both
@@ -94,6 +98,9 @@ export class Ship {
   boostFactor = 1; // speed multiplier from the speed power-up
   rangeFactor = 1; // cannon range multiplier from the range power-up
   damageFactor = 1; // cannon damage multiplier from the damage power-up
+  /** How much way the hull is carrying under the brake: 1 = full sail, 0 =
+   *  stopped. Eases between the two over BRAKE_RAMP seconds. */
+  brakeFactor = 1;
   depth = 0; // submarine: 0 surfaced → 1 fully submerged
   /** Team Mode allegiance; null outside Team Mode (multiplayer only). */
   team: Team | null = null;
@@ -145,9 +152,16 @@ export class Ship {
       return;
     }
 
-    // Braking kills forward way but not the helm — you can still turn in place.
+    // Braking bleeds off forward way but never touches the helm — you can
+    // still turn while you're slowing, stopped, or picking sail back up. The
+    // hull takes BRAKE_RAMP seconds to come to a stop and the same to get
+    // back up to speed, so neither is instant.
     this.heading += turn * this.turnRate * dt;
-    const v = braking ? 0 : this.speed * speedFactor * this.boostFactor;
+    const step = dt / BRAKE_RAMP;
+    this.brakeFactor = braking
+      ? Math.max(0, this.brakeFactor - step)
+      : Math.min(1, this.brakeFactor + step);
+    const v = this.speed * speedFactor * this.boostFactor * this.brakeFactor;
     this.x += Math.cos(this.heading) * v * dt;
     this.y += Math.sin(this.heading) * v * dt;
 

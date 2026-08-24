@@ -100,8 +100,10 @@ const RAM_DMG = RAM.dmg;
 const RAM_SELF_DMG = RAM.selfDmg;
 const RAM_BOW_COS = RAM.bowCos;
 const RAM_CD = RAM.cd;
-const MAX_PICKUPS = 9;
-const MAX_PICKUPS_SCORE = 15; // Leaderboard is a bounty-rich brawl — more on the water at once
+// A hard ceiling of 7 bounties afloat at once, in every mode — Leaderboard
+// included, so the brawl no longer gets a bigger share of the water.
+const MAX_PICKUPS = 7;
+const MAX_PICKUPS_SCORE = 7;
 const PICKUP_HASTE_SCORE = 0.55; // ...and they respawn faster too (interval multiplier)
 const PICKUP_R = 15; // px
 const PICKUP_TTL = 20; // s before an uncollected pickup relocates
@@ -1187,7 +1189,8 @@ export class MpSession {
       }
 
       // Braking: on any hull but the submarine (which already holds ↓/S for
-      // diving), the same key kills forward way while held.
+      // diving), the same key bleeds off forward way while held (see the
+      // BRAKE_RAMP easing in Ship.update).
       const braking =
         ship.type !== 'submarine' &&
         !frozen &&
