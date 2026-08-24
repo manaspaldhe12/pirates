@@ -359,7 +359,8 @@ export class Game {
     this.tickBuff(this.enemy, this.enemyBuff, dt);
 
     // Braking: on any hull but the submarine (which already holds ↓/S for
-    // diving), the same key kills forward way while held.
+    // diving), the same key bleeds off forward way while held (see the
+    // BRAKE_RAMP easing in Ship.update).
     const playerBraking =
       this.player.type !== 'submarine' &&
       !this.over &&

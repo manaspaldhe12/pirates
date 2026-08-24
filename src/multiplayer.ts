@@ -1189,7 +1189,8 @@ export class MpSession {
       }
 
       // Braking: on any hull but the submarine (which already holds ↓/S for
-      // diving), the same key kills forward way while held.
+      // diving), the same key bleeds off forward way while held (see the
+      // BRAKE_RAMP easing in Ship.update).
       const braking =
         ship.type !== 'submarine' &&
         !frozen &&

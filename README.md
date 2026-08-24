@@ -88,9 +88,10 @@ starts the battle once 2–11 captains are in.
   adapt: Double gives a torpedo spread, Rapid Fire a torpedo stream, and
   Damage still doubles torpedo damage — but Range is dead weight, since
   torpedoes already run the length of the map.
-- **Braking** — hold **↓/S** to stop dead (you can still turn) and let go to
-  sail on again; every hull but the submarine has it, since that key is
-  already spoken for underwater.
+- **Braking** — hold **↓/S** to haul up (you can still turn) and let go to
+  sail on again; the hull takes about a second to come to a stop and another
+  to get back up to speed, so it's a decision, not a switch. Every hull but
+  the submarine has it, since that key is already spoken for underwater.
 - **Team Mode** — an off/on toggle the host sets in the lobby (Play with
   Friends only). On, every captain is split into two **random Red/Blue crews**
   (rebalanced fresh each round) instead of a free-for-all: **Blue musters a
@@ -148,15 +149,16 @@ starts the battle once 2–11 captains are in.
 | `1`–`3`, or `4` for random | Choose the enemy's ship |
 | `1` / `2` / `3` | Choose difficulty (easy / medium / hard) |
 | `←` / `→` or `A` / `D` | Steer left / right |
-| `↓` or `S` | Brake — hold to kill forward way, release to sail on (submarine dives instead) |
+| `↓` or `S` | Brake — hold to bleed off way over ~1s, release to sail on again (submarine dives instead) |
 | `Space` | Fire a broadside |
 | `R` | After a battle ends, return to ship select |
 
 Your ship is always under sail and moves forward on its own — you only steer,
-just like in the original Pirates!. Hold **↓/S to brake**: you stop dead (you
-can still turn in place) for as long as you hold it, then pick up sail again
-the instant you let go — handy for lining up a shot or avoiding overrunning a
-turn. Cannons fire a broadside from whichever side of your hull faces the
+just like in the original Pirates!. Hold **↓/S to brake**: way bleeds off over
+about a second until you're stopped (you can still turn in place throughout),
+and letting go takes about a second to pick sail back up — handy for lining up
+a shot or avoiding overrunning a turn, but you have to plan it a moment ahead.
+Cannons fire a broadside from whichever side of your hull faces the
 enemy, and the balls fly **perpendicular to your heading**, so you have to
 maneuver to bring your guns to bear. The enemy captain does the same: it
 chases you from a distance, then turns sideways to line up its own broadside.
