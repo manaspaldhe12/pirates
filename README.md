@@ -115,8 +115,12 @@ starts the battle once 2–11 captains are in.
   **Destroy Base** turns sinking into an inconvenience, not an ending: every
   captain has a fortified **base at their spawn point** with **300 HP** (100×
   a small hull), and going down just sends you back to it after a
-  **10-second wait** — only a **destroyed base** (aim your broadsides at an
-  enemy's, never your own) knocks a captain out for good. There's no
+  **10-second wait** — only a **destroyed base** knocks a captain out for
+  good. A base is **solid**: ram into someone else's and your ship is wrecked
+  outright, at no HP cost to the base (your own base never hurts you — every
+  respawn lands you right on it). Cannon fire is the only thing that damages
+  a base, and **friendly fire is on** for it — your own broadsides hurt your
+  own base just as readily as an enemy's. There's no
   maelstrom in this mode — bases are fixed, so nothing forces a convergence.
   It ends when one base stands or every human's base has fallen. Bots fight
   ships as usual but don't deliberately hunt a base — cracking one open is

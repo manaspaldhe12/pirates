@@ -53,7 +53,7 @@ export const RAM = {
  *  each captain's base sits at their spawn point for the whole match. */
 export const BASE = {
   hp: SHIP_TYPES.small.maxHealth * 100, // 100× a small hull's hit points
-  r: 45, // px, visual + cannonball trigger radius
+  r: 32, // px, visual + collision radius — half the area of the original 45px
   respawnDelay: 10, // s a sunk ship waits before returning to its own base
 } as const;
 

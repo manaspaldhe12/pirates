@@ -1054,6 +1054,21 @@ export class MpSession {
         while (ship.alive) ship.takeHit();
         this.pendingEvents.push({ e: 'hit', x: ship.x, y: ship.y, by: -1, on: i });
       }
+      // Destroy Base: bases are solid — ramming into someone else's fort
+      // wrecks your ship outright, at no HP cost to the base. Your own base
+      // never hurts you (every respawn lands you right on top of it).
+      if (ship.alive && this.mode === 'base' && this.spawnUntil[i] <= this.clock) {
+        for (let j = 0; j < this.baseHp.length; j++) {
+          if (j === i) continue;
+          const dx = wrapDelta(ship.x - this.spawns[j].x, this.worldW);
+          const dy = wrapDelta(ship.y - this.spawns[j].y, this.worldH);
+          if (Math.hypot(dx, dy) < BASE.r + ship.width * 0.5) {
+            while (ship.alive) ship.takeHit();
+            this.pendingEvents.push({ e: 'hit', x: ship.x, y: ship.y, by: -1, on: i });
+            break;
+          }
+        }
+      }
       if (this.phase === 'battle' && ship.alive) this.scores[i].time += dt; // survival score
     });
 
@@ -1166,12 +1181,12 @@ export class MpSession {
           break;
         }
       }
-      // Destroy Base: a shot that missed every ship can still strike an
-      // opponent's base (never your own — bases only take enemy fire).
+      // Destroy Base: a shot that missed every ship can still strike a base —
+      // friendly fire is on here, so your own base isn't spared either.
       if (!ball.spent && this.mode === 'base') {
         const ownerIdx = this.ships.indexOf(ball.owner);
         for (let i = 0; i < this.baseHp.length; i++) {
-          if (i === ownerIdx || this.baseHp[i] <= 0) continue;
+          if (this.baseHp[i] <= 0) continue;
           const dx = wrapDelta(ball.x - this.spawns[i].x, this.worldW);
           const dy = wrapDelta(ball.y - this.spawns[i].y, this.worldH);
           if (Math.hypot(dx, dy) >= BASE.r) continue;

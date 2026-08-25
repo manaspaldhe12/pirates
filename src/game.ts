@@ -305,7 +305,10 @@ export class Game {
     );
 
     this.updateRam(dt, w, h);
-    if (!this.over) this.updateBaseRespawns(dt);
+    if (!this.over) {
+      this.updateBaseCollisions();
+      this.updateBaseRespawns(dt);
+    }
 
     if (!this.over) {
       // Advance any manual reload in progress; refill the magazine when done.
@@ -354,14 +357,17 @@ export class Game {
         this.explosions.push(new Explosion(ball.x, ball.y));
         this.onHit?.(target === this.player);
       } else if (!ball.spent && this.baseMode) {
-        // Destroy Base: a shot that missed the (possibly respawning) enemy
-        // ship can still strike their base — never your own.
-        const enemyBase = shooterIsPlayer ? this.enemyBase : this.playerBase;
-        if (enemyBase.hp > 0 && Math.hypot(ball.x - enemyBase.x, ball.y - enemyBase.y) < BASE.r) {
+        // Destroy Base: a shot that missed the (possibly respawning) target
+        // ship can still strike a base — friendly fire is on, so a base isn't
+        // spared just because its owner fired the shot.
+        for (const base of [this.playerBase, this.enemyBase]) {
+          if (base.hp <= 0) continue;
+          if (Math.hypot(ball.x - base.x, ball.y - base.y) >= BASE.r) continue;
           ball.spent = true;
-          enemyBase.hp = Math.max(0, enemyBase.hp - ball.damage);
+          base.hp = Math.max(0, base.hp - ball.damage);
           this.explosions.push(new Explosion(ball.x, ball.y));
-          this.onHit?.(!shooterIsPlayer);
+          this.onHit?.(base === this.playerBase);
+          break;
         }
       }
     }
@@ -426,6 +432,21 @@ export class Game {
     this.ramCd = RAM.cd;
     this.explosions.push(new Explosion(A.x + nx * (dist / 2), A.y + ny * (dist / 2)));
     this.onHit?.(youWereHit);
+  }
+
+  /** Destroy Base: bases are solid — ramming into the OTHER combatant's fort
+   *  wrecks your ship outright, at no HP cost to the base. Your own base
+   *  never hurts you (you respawn right on top of it). */
+  private updateBaseCollisions() {
+    if (!this.baseMode) return;
+    if (this.player.alive) {
+      const d = Math.hypot(this.player.x - this.enemyBase.x, this.player.y - this.enemyBase.y);
+      if (d < BASE.r + this.player.width * 0.5) while (this.player.alive) this.player.takeHit();
+    }
+    if (this.enemy.alive) {
+      const d = Math.hypot(this.enemy.x - this.playerBase.x, this.enemy.y - this.playerBase.y);
+      if (d < BASE.r + this.enemy.width * 0.5) while (this.enemy.alive) this.enemy.takeHit();
+    }
   }
 
   /** Destroy Base: a sunk hull waits BASE.respawnDelay, then returns to its
