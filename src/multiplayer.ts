@@ -1693,14 +1693,24 @@ export class MpSession {
       const sw = SWIRL_FRAC * pull;
       const tx = ship.x + (nx * pull - ny * sw) * dt;
       const ty = ship.y + (ny * pull + nx * sw) * dt;
-      // Don't let the current sweep a ship onto a lethal island.
-      if (!shipHitsIsland(this.islands, { x: tx, y: ty, width: ship.width })) {
+      const pinned = shipHitsIsland(this.islands, { x: tx, y: ty, width: ship.width });
+      if (!pinned) {
         ship.x = tx;
         ship.y = ty;
+      } else if (this.spawnUntil[i] <= this.clock) {
+        // The current is grinding this hull against the rocks — that's the
+        // root cause of a ship going "stuck" outside the eye in the first
+        // place, and it's exactly as fatal as running aground outright.
+        // Don't leave it pinned there to slowly bleed out instead.
+        while (ship.alive) ship.takeHit();
+        this.pendingEvents.push({ e: 'hit', x: ship.x, y: ship.y, by: -1, on: i });
+        this.strandedFor[i] = 0;
+        return;
       }
 
-      // Stranded outside the eye — start the bleed once the grace period
-      // runs out. Fresh spawns are immune, same as they are to grounding.
+      // Stranded outside the eye without (yet) being pinned against an
+      // island — start the bleed once the grace period runs out. Fresh
+      // spawns are immune, same as they are to grounding.
       if (this.spawnUntil[i] > this.clock) return;
       if (!outside) {
         this.strandedFor[i] = 0;
