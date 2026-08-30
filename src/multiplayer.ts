@@ -189,6 +189,14 @@ const END_DELAY = 1.7; // let the sinking animation play before declaring a winn
 const WAVE_DRIFT = 14;
 const SMOOTH_RATE = 14; // guest position smoothing for other ships (higher = snappier)
 const SNAP_DIST = 250; // beyond this a target jump is a wrap/teleport — snap, don't glide
+// A reconcileOwnShip correction below this is ordinary per-snapshot drift —
+// stays instant/imperceptible, as it always has. Above it (but still under
+// SNAP_DIST, which is a real wrap/respawn teleport) it's a network hiccup
+// catching up — worth animating so it reads as a quick catch-up dash rather
+// than a jump-cut. See predictOwnShip's `catchUp` handling.
+const CATCHUP_MIN = 80;
+const CATCHUP_SPEED = 900; // px/s the local ship "dashes" at while catching up
+const CATCHUP_TURN_RATE = 8; // heading catch-up blend rate (higher = snappier)
 
 // Humans sail vivid hulls, bots sail greys — so the real players pop out of a
 // crowded bot fleet at a glance. (Your own hull is repainted pink locally, so
@@ -461,6 +469,10 @@ export class MpSession {
   private stepBuffer: Array<{ idx: number; dt: number; turn: Turn; sf: number; boost: number; braking: boolean }> =
     [];
   private pendingAcks: Array<{ seq: number; steps: number }> = [];
+  // Set when reconcileOwnShip finds a mid-sized correction (a hiccup, not
+  // ordinary drift): predictOwnShip dashes the ship toward this each frame
+  // instead of teleporting there in one reconcile.
+  private catchUp: { x: number; y: number; heading: number } | null = null;
 
   // Shared battle state (host simulates; guest mirrors)
   private you = 0;
@@ -2169,7 +2181,10 @@ export class MpSession {
     // covers both windows, so just follow the snapshot directly through it
     // (nothing buffered, so reconcileOwnShip's replay is a no-op then).
     const frozen = this.phase !== 'battle' || this.freeze > 0 || t.inv;
-    if (frozen || !ship.alive) return;
+    if (frozen || !ship.alive) {
+      this.catchUp = null; // a respawn/round reset already snapped us there
+      return;
+    }
 
     const boost = this.buffView[this.you]?.spd ? SPEED_MULT : 1;
     const braking = ship.type !== 'submarine' && dive;
@@ -2178,6 +2193,26 @@ export class MpSession {
     ship.update(dt, turn, this.worldW, this.worldH, sf, braking);
     if (this.stepBuffer.length >= 600) this.stepBuffer.shift(); // dead-connection safety valve
     this.stepBuffer.push({ idx: ++this.totalSteps, dt, turn, sf, boost, braking });
+
+    // Dash toward a pending mid-sized correction (see reconcileOwnShip)
+    // instead of having already teleported there — a hiccup should read as
+    // a quick catch-up, not a jump-cut, while input stays live throughout.
+    if (this.catchUp) {
+      const dx = this.catchUp.x - ship.x;
+      const dy = this.catchUp.y - ship.y;
+      const dist = Math.hypot(dx, dy);
+      const step = CATCHUP_SPEED * dt;
+      if (dist <= step) {
+        ship.x = this.catchUp.x;
+        ship.y = this.catchUp.y;
+        ship.heading = this.catchUp.heading;
+        this.catchUp = null;
+      } else {
+        ship.x += (dx / dist) * step;
+        ship.y += (dy / dist) * step;
+        ship.heading += angleDiff(this.catchUp.heading, ship.heading) * Math.min(1, CATCHUP_TURN_RATE * dt);
+      }
+    }
   }
 
   /** Guest only: reconcile our own ship against a fresh host snapshot. Reset
@@ -2198,6 +2233,9 @@ export class MpSession {
     this.prevStateAt = now;
     const beforeX = ship.x;
     const beforeY = ship.y;
+    const beforeHeading = ship.heading;
+    const beforeBrake = ship.brakeFactor;
+    const beforeReload = ship.reload;
     const bufLenBefore = this.stepBuffer.length;
     const ackLag = this.inputSeq - t.ack;
 
@@ -2215,19 +2253,46 @@ export class MpSession {
       ship.update(s.dt, s.turn, this.worldW, this.worldH, s.sf, s.braking);
     }
 
+    const jump = Math.hypot(ship.x - beforeX, ship.y - beforeY);
+    let mode: 'snap' | 'catchup' | 'dashing' = 'snap';
+    // Anything under CATCHUP_MIN is ordinary per-snapshot drift — leave the
+    // instant correction just applied above, as always. Anything past
+    // SNAP_DIST is a real wrap/respawn teleport, not a hiccup — same. Only
+    // the band between is "a stall just caught up": undo the instant jump
+    // and let predictOwnShip dash there over the next few frames instead.
+    if (jump > CATCHUP_MIN && jump <= SNAP_DIST) {
+      mode = 'catchup';
+      this.catchUp = { x: ship.x, y: ship.y, heading: ship.heading };
+      ship.x = beforeX;
+      ship.y = beforeY;
+      ship.heading = beforeHeading;
+      ship.brakeFactor = beforeBrake;
+      ship.reload = beforeReload;
+    } else if (jump <= CATCHUP_MIN && this.catchUp) {
+      // Routine per-snapshot noise while a dash is already in flight —
+      // don't let it abort the dash early; just ignore it and keep going.
+      mode = 'dashing';
+      ship.x = beforeX;
+      ship.y = beforeY;
+      ship.heading = beforeHeading;
+      ship.brakeFactor = beforeBrake;
+      ship.reload = beforeReload;
+    } else {
+      this.catchUp = null;
+    }
+
     if (this.debugOn) {
-      const jump = Math.hypot(ship.x - beforeX, ship.y - beforeY);
       // A big gap since the last snapshot, or a big correction once one
       // finally arrives, is the signature of a real network stall. Small
       // jumps every snapshot are normal (that's the replay working).
       if (gapMs > 100 || jump > 15) {
         const t0 = performance.now();
-        const line = `[${(t0 / 1000).toFixed(1)}s] gap=${gapMs.toFixed(0)}ms jump=${jump.toFixed(0)}px ackLag=${ackLag} buf=${bufLenBefore}→${this.stepBuffer.length}`;
+        const line = `[${(t0 / 1000).toFixed(1)}s] gap=${gapMs.toFixed(0)}ms jump=${jump.toFixed(0)}px(${mode}) ackLag=${ackLag} buf=${bufLenBefore}→${this.stepBuffer.length}`;
         this.debugLog.push(line);
         if (this.debugLog.length > 30) this.debugLog.shift();
       }
       if (this.debugEl) {
-        const live = `live: ackLag=${ackLag} buf=${this.stepBuffer.length} sinceSnap=${gapMs.toFixed(0)}ms\n─── events (gap>100ms or jump>15px) ───\n`;
+        const live = `live: ackLag=${ackLag} buf=${this.stepBuffer.length} sinceSnap=${gapMs.toFixed(0)}ms catchUp=${this.catchUp ? 'yes' : 'no'}\n─── events (gap>100ms or jump>15px) ───\n`;
         this.debugEl.textContent = live + this.debugLog.join('\n');
       }
     }
