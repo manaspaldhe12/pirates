@@ -187,12 +187,7 @@ const SNAPSHOT_INTERVAL = 1 / 30;
 const INPUT_INTERVAL = 0.05; // guest input heartbeat
 const END_DELAY = 1.7; // let the sinking animation play before declaring a winner
 const WAVE_DRIFT = 14;
-const SMOOTH_RATE = 14; // guest position smoothing (higher = snappier)
-// The local ship is predicted from input immediately (see predictOwnShip),
-// so it only needs a gentle pull toward the host's snapshot to correct drift
-// — a full SMOOTH_RATE pull there would fight the prediction and reintroduce
-// the round-trip lag it exists to remove.
-const RECONCILE_RATE = 4;
+const SMOOTH_RATE = 14; // guest position smoothing for other ships (higher = snappier)
 const SNAP_DIST = 250; // beyond this a target jump is a wrap/teleport — snap, don't glide
 
 // Humans sail vivid hulls, bots sail greys — so the real players pop out of a
@@ -407,6 +402,7 @@ interface HostPlayer {
   dive: boolean;
   reload: boolean; // latched R request (humans); consumed by the fire tick
   touch: boolean; // captain is on a touch screen (no R key — taps reload instead)
+  lastInputSeq: number; // highest 'input' seq applied so far (echoed back for guest replay reconciliation)
 }
 
 export interface MpCallbacks {
@@ -451,6 +447,20 @@ export class MpSession {
   private lastSnapAt = 0;
   private inputAcc = 0;
   private lastSent = { turn: 0 as Turn, fire: false, dive: false };
+  // Own-ship reconciliation: every local physics step is buffered (see
+  // predictOwnShip) tagged with a monotonic step count; every sent input is
+  // tagged with a seq and the step count at send time. When the host echoes
+  // back the seq it has applied, we know which buffered steps are already
+  // baked into its snapshot and can replay only the rest — see
+  // reconcileOwnShip. This is the standard FPS client-prediction pattern
+  // (reset to the last acknowledged state, replay unacked inputs) rather
+  // than a continuous blend toward the snapshot, which fights prediction
+  // and stutters under any latency hiccup.
+  private inputSeq = 0;
+  private totalSteps = 0;
+  private stepBuffer: Array<{ idx: number; dt: number; turn: Turn; sf: number; boost: number; braking: boolean }> =
+    [];
+  private pendingAcks: Array<{ seq: number; steps: number }> = [];
 
   // Shared battle state (host simulates; guest mirrors)
   private you = 0;
@@ -580,7 +590,7 @@ export class MpSession {
   ): MpSession {
     const s = new MpSession(true, ctx, input, cb, sounds);
     s.players = [
-      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false, reload: false, touch: false },
+      { conn: null, name: cleanName(name), ship: 'small', ready: false, connected: true, bot: false, turn: 0, fire: false, dive: false, reload: false, touch: false, lastInputSeq: 0 },
     ];
     // Open the lobby immediately so bot play never waits on (or requires) the
     // matchmaking broker; the room code fills in when/if the broker responds.
@@ -660,6 +670,7 @@ export class MpSession {
       dive: false,
       reload: false,
       touch: false,
+      lastInputSeq: 0,
     };
   }
 
@@ -820,6 +831,7 @@ export class MpSession {
         dive: false,
         reload: false,
         touch: false,
+        lastInputSeq: 0,
       });
       this.pushLobby();
       return;
@@ -840,6 +852,7 @@ export class MpSession {
       player.dive = !!msg.dive;
       if (msg.reload) player.reload = true; // latch only; the fire tick clears it
       player.touch = !!msg.touch;
+      player.lastInputSeq = Math.max(player.lastInputSeq, msg.seq);
     }
   }
 
@@ -895,6 +908,7 @@ export class MpSession {
       dive: false,
       reload: false,
       touch: false,
+      lastInputSeq: 0,
     };
     this.players.push(player);
     const i = this.players.length - 1;
@@ -1865,6 +1879,7 @@ export class MpSession {
         kills: this.scoreView[i]?.kills ?? 0,
         ammo: this.mag[i] ?? 0,
         rl: this.reloadT[i] > 0 ? this.reloadT[i] / MAG_RELOAD : 0,
+        ack: this.players[i]?.lastInputSeq ?? 0,
       })),
       balls: this.balls.map((b) => ({ x: b.x, y: b.y, vx: b.vx, vy: b.vy, tp: b.torpedo })),
       wind: this.wind.direction,
@@ -1945,6 +1960,7 @@ export class MpSession {
           kills: 0,
           ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
           rl: 0,
+          ack: 0,
         }));
         this.buffView = msg.ships.map(() => ({
           shield: 0,
@@ -1965,6 +1981,12 @@ export class MpSession {
         this.splashes = [];
         this.wind = new Wind();
         this.lastSent = { turn: 0, fire: false, dive: false };
+        // inputSeq is NOT reset — it must stay monotonic against the host's
+        // lastInputSeq, which also isn't reset across rounds. totalSteps and
+        // the buffers are purely local bookkeeping and safe to zero here.
+        this.totalSteps = 0;
+        this.stepBuffer = [];
+        this.pendingAcks = [];
         this.phase = 'battle';
         this.cb.onStart();
         this.startLoop();
@@ -1999,6 +2021,7 @@ export class MpSession {
             kills: 0,
             ammo: SHIP_TYPES[sp.type].guns * MAG_BROADSIDES,
             rl: 0,
+            ack: 0,
           });
           this.buffView.push({
             shield: 0,
@@ -2025,6 +2048,7 @@ export class MpSession {
         this.lastSnapAt = performance.now();
         this.wind.direction = msg.wind;
         this.applyEvents(msg.events);
+        this.reconcileOwnShip();
         break;
 
       case 'end':
@@ -2065,8 +2089,13 @@ export class MpSession {
       ) {
         this.inputAcc = 0;
         this.lastSent = { turn, fire, dive };
+        const seq = ++this.inputSeq;
+        // Cap defensively — only grows unbounded if 'state' snapshots stop
+        // arriving entirely (a dead connection), not under normal play.
+        if (this.pendingAcks.length >= 200) this.pendingAcks.shift();
+        this.pendingAcks.push({ seq, steps: this.totalSteps });
         if (this.conn?.open)
-          this.conn.send({ t: 'input', turn, fire, dive, reload, touch: this.isTouchDevice } satisfies C2HMsg);
+          this.conn.send({ t: 'input', seq, turn, fire, dive, reload, touch: this.isTouchDevice } satisfies C2HMsg);
       }
     }
 
@@ -2115,10 +2144,9 @@ export class MpSession {
   /** Guest only: apply local steering input to our own ship the instant it
    *  happens, using the same physics the host runs, instead of waiting a
    *  full round trip for a snapshot to move it — that wait is the actual
-   *  "feels laggy when I'm not host" complaint. The host snapshot stays
-   *  authoritative: we nudge toward it every frame (reconcileOwnShip below)
-   *  so any drift — a missed frame, a collision only the host resolves —
-   *  gets corrected instead of compounding. */
+   *  "feels laggy when I'm not host" complaint. Every step taken here is
+   *  buffered so reconcileOwnShip can replay it on top of the host's next
+   *  confirmed snapshot. */
   private predictOwnShip(dt: number, turn: Turn, dive: boolean) {
     const ship = this.ships[this.you];
     const t = this.targets[this.you];
@@ -2126,29 +2154,45 @@ export class MpSession {
 
     // Respawns and the round-start pause hold the ship still on the host,
     // but we don't mirror that timer over the wire — `inv` (spawn shield)
-    // covers both windows, so just follow the snapshot directly through it.
+    // covers both windows, so just follow the snapshot directly through it
+    // (nothing buffered, so reconcileOwnShip's replay is a no-op then).
     const frozen = this.phase !== 'battle' || this.freeze > 0 || t.inv;
-    if (!frozen && ship.alive) {
-      ship.boostFactor = this.buffView[this.you]?.spd ? SPEED_MULT : 1;
-      const braking = ship.type !== 'submarine' && dive;
-      const sf = ship.type === 'submarine' ? 1 : this.wind.speedFactor(ship.heading);
-      ship.update(dt, turn, this.worldW, this.worldH, sf, braking);
-    }
+    if (frozen || !ship.alive) return;
 
-    // Gentle correction toward the host's authoritative position — see
-    // RECONCILE_RATE. A large jump is a world-wrap or a real desync, not
-    // drift, so snap instead of easing into it.
-    const dx = t.x - ship.x;
-    const dy = t.y - ship.y;
-    if (Math.abs(dx) > SNAP_DIST || Math.abs(dy) > SNAP_DIST) {
-      ship.x = t.x;
-      ship.y = t.y;
-      ship.heading = t.heading;
-    } else {
-      const c = 1 - Math.exp(-RECONCILE_RATE * dt);
-      ship.x += dx * c;
-      ship.y += dy * c;
-      ship.heading += angleDiff(t.heading, ship.heading) * c;
+    const boost = this.buffView[this.you]?.spd ? SPEED_MULT : 1;
+    const braking = ship.type !== 'submarine' && dive;
+    const sf = ship.type === 'submarine' ? 1 : this.wind.speedFactor(ship.heading);
+    ship.boostFactor = boost;
+    ship.update(dt, turn, this.worldW, this.worldH, sf, braking);
+    if (this.stepBuffer.length >= 600) this.stepBuffer.shift(); // dead-connection safety valve
+    this.stepBuffer.push({ idx: ++this.totalSteps, dt, turn, sf, boost, braking });
+  }
+
+  /** Guest only: reconcile our own ship against a fresh host snapshot. Reset
+   *  to the confirmed baseline, then replay every locally-buffered step the
+   *  host's `ack` shows it hasn't accounted for yet — the standard
+   *  prediction/reconciliation pattern (Quake/Source-style netcode), as
+   *  opposed to a continuous blend toward the snapshot: under normal play
+   *  the replay reproduces exactly where we already were (no visible
+   *  correction at all), and it can't compound into a stutter across a
+   *  latency hiccup the way a per-frame spring pull can. */
+  private reconcileOwnShip() {
+    const ship = this.ships[this.you];
+    const t = this.targets[this.you];
+    if (!ship || !t) return;
+
+    let cutoff = 0;
+    while (this.pendingAcks.length && this.pendingAcks[0].seq <= t.ack) {
+      cutoff = this.pendingAcks.shift()!.steps;
+    }
+    this.stepBuffer = this.stepBuffer.filter((s) => s.idx > cutoff);
+
+    ship.x = t.x;
+    ship.y = t.y;
+    ship.heading = t.heading;
+    for (const s of this.stepBuffer) {
+      ship.boostFactor = s.boost;
+      ship.update(s.dt, s.turn, this.worldW, this.worldH, s.sf, s.braking);
     }
   }
 
