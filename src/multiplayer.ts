@@ -188,6 +188,11 @@ const INPUT_INTERVAL = 0.05; // guest input heartbeat
 const END_DELAY = 1.7; // let the sinking animation play before declaring a winner
 const WAVE_DRIFT = 14;
 const SMOOTH_RATE = 14; // guest position smoothing (higher = snappier)
+// The local ship is predicted from input immediately (see predictOwnShip),
+// so it only needs a gentle pull toward the host's snapshot to correct drift
+// — a full SMOOTH_RATE pull there would fight the prediction and reintroduce
+// the round-trip lag it exists to remove.
+const RECONCILE_RATE = 4;
 const SNAP_DIST = 250; // beyond this a target jump is a wrap/teleport — snap, don't glide
 
 // Humans sail vivid hulls, bots sail greys — so the real players pop out of a
@@ -2036,15 +2041,17 @@ export class MpSession {
   }
 
   private guestUpdate(dt: number) {
+    let turn: Turn = 0;
+    let dive = false;
     if (this.phase === 'battle') {
-      const turn: Turn =
+      turn =
         this.input.isDown('ArrowLeft') || this.input.isDown('KeyA')
           ? -1
           : this.input.isDown('ArrowRight') || this.input.isDown('KeyD')
             ? 1
             : 0;
       const fire = this.input.isDown('Space');
-      const dive = this.input.isDown('ArrowDown') || this.input.isDown('KeyS');
+      dive = this.input.isDown('ArrowDown') || this.input.isDown('KeyS');
       // A one-shot reload pulse (touch taps to reload are inferred host-side
       // from an empty-magazine fire, so only the R key needs sending).
       const reload = this.input.wasPressed('KeyR');
@@ -2063,21 +2070,26 @@ export class MpSession {
       }
     }
 
-    // Glide each hull toward its latest snapshot; snap across world-wrap jumps.
+    // Move our own hull from local input right away — see predictOwnShip for
+    // why. Every other hull still just glides toward its latest snapshot.
+    this.predictOwnShip(dt, turn, dive);
+
     const k = 1 - Math.exp(-SMOOTH_RATE * dt);
     this.ships.forEach((ship, i) => {
       const t = this.targets[i];
       if (!t) return;
-      const dx = t.x - ship.x;
-      const dy = t.y - ship.y;
-      if (Math.abs(dx) > SNAP_DIST || Math.abs(dy) > SNAP_DIST) {
-        ship.x = t.x;
-        ship.y = t.y;
-        ship.heading = t.heading;
-      } else {
-        ship.x += dx * k;
-        ship.y += dy * k;
-        ship.heading += angleDiff(t.heading, ship.heading) * k;
+      if (i !== this.you) {
+        const dx = t.x - ship.x;
+        const dy = t.y - ship.y;
+        if (Math.abs(dx) > SNAP_DIST || Math.abs(dy) > SNAP_DIST) {
+          ship.x = t.x;
+          ship.y = t.y;
+          ship.heading = t.heading;
+        } else {
+          ship.x += dx * k;
+          ship.y += dy * k;
+          ship.heading += angleDiff(t.heading, ship.heading) * k;
+        }
       }
       ship.health = t.health;
       ship.sinkProgress = t.sink;
@@ -2098,6 +2110,46 @@ export class MpSession {
 
     this.driftWaves(dt);
     this.tickEffects(dt);
+  }
+
+  /** Guest only: apply local steering input to our own ship the instant it
+   *  happens, using the same physics the host runs, instead of waiting a
+   *  full round trip for a snapshot to move it — that wait is the actual
+   *  "feels laggy when I'm not host" complaint. The host snapshot stays
+   *  authoritative: we nudge toward it every frame (reconcileOwnShip below)
+   *  so any drift — a missed frame, a collision only the host resolves —
+   *  gets corrected instead of compounding. */
+  private predictOwnShip(dt: number, turn: Turn, dive: boolean) {
+    const ship = this.ships[this.you];
+    const t = this.targets[this.you];
+    if (!ship || !t) return;
+
+    // Respawns and the round-start pause hold the ship still on the host,
+    // but we don't mirror that timer over the wire — `inv` (spawn shield)
+    // covers both windows, so just follow the snapshot directly through it.
+    const frozen = this.phase !== 'battle' || this.freeze > 0 || t.inv;
+    if (!frozen && ship.alive) {
+      ship.boostFactor = this.buffView[this.you]?.spd ? SPEED_MULT : 1;
+      const braking = ship.type !== 'submarine' && dive;
+      const sf = ship.type === 'submarine' ? 1 : this.wind.speedFactor(ship.heading);
+      ship.update(dt, turn, this.worldW, this.worldH, sf, braking);
+    }
+
+    // Gentle correction toward the host's authoritative position — see
+    // RECONCILE_RATE. A large jump is a world-wrap or a real desync, not
+    // drift, so snap instead of easing into it.
+    const dx = t.x - ship.x;
+    const dy = t.y - ship.y;
+    if (Math.abs(dx) > SNAP_DIST || Math.abs(dy) > SNAP_DIST) {
+      ship.x = t.x;
+      ship.y = t.y;
+      ship.heading = t.heading;
+    } else {
+      const c = 1 - Math.exp(-RECONCILE_RATE * dt);
+      ship.x += dx * c;
+      ship.y += dy * c;
+      ship.heading += angleDiff(t.heading, ship.heading) * c;
+    }
   }
 
   // ── Shared loop & effects ───────────────────────────────────────────────────

@@ -223,7 +223,15 @@ export function createGuestPeer(
 
   peer.on('open', () => {
     if (destroyed) return;
-    const conn = peer.connect(ID_PREFIX + code.toUpperCase().trim(), { reliable: true });
+    // Unordered, not unreliable: PeerJS's `reliable` flag only toggles the
+    // underlying data channel's `ordered` option, so delivery is still
+    // guaranteed — a late/stale message just won't block a newer one behind
+    // it. State snapshots supersede each other every ~33ms, so a stuck-behind
+    // old one is pure latency for no benefit. The rarer control messages
+    // (lobby/start/roster/end) could in principle arrive out of order too,
+    // but each one fully replaces the relevant state, so a stray reorder
+    // self-corrects on the very next message instead of corrupting anything.
+    const conn = peer.connect(ID_PREFIX + code.toUpperCase().trim(), { reliable: false });
     conn.on('open', () => {
       opened = true;
       clearTimeout(timeout);
