@@ -62,6 +62,7 @@ export interface ShipState {
   kills: number; // enemies sunk
   ammo: number; // shells left in the magazine (host-authoritative)
   rl: number; // magazine reload progress remaining, 1→0; 0 = loaded
+  ack: number; // highest input seq the host has applied for this ship (guest replay reconciliation)
 }
 
 export interface BallState {
@@ -87,7 +88,7 @@ export type C2HMsg =
   | { t: 'hello'; name: string }
   | { t: 'choose'; ship: ShipTypeName }
   | { t: 'ready'; ready: boolean }
-  | { t: 'input'; turn: Turn; fire: boolean; dive: boolean; reload: boolean; touch: boolean };
+  | { t: 'input'; seq: number; turn: Turn; fire: boolean; dive: boolean; reload: boolean; touch: boolean };
 
 /** Host → guest. */
 export type H2CMsg =
