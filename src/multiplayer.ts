@@ -509,6 +509,17 @@ export class MpSession {
   private prevMyKills = 0; // last frame's own kill count, for the kill fanfare
   private prevMeAlive = true; // last frame's own alive flag, for the sunk cue
 
+  // TEMPORARY netcode diagnostics — enable with ?debug on the URL. Surfaces
+  // exactly the numbers needed to tell a real network stall apart from a
+  // reconciliation bug: the gap between snapshots, and how far a snapshot's
+  // replay actually had to move the ship. Remove once the stutter reports
+  // are root-caused.
+  private readonly debugOn =
+    typeof location !== 'undefined' && new URLSearchParams(location.search).has('debug');
+  private debugEl: HTMLPreElement | null = null;
+  private debugLog: string[] = [];
+  private prevStateAt = 0;
+
   private constructor(
     isHost: boolean,
     ctx: CanvasRenderingContext2D,
@@ -523,6 +534,7 @@ export class MpSession {
     this.sounds = sounds;
     // Dev-only hook so E2E tests can observe the simulation; stripped in prod.
     if (import.meta.env.DEV) (window as unknown as { __mp: MpSession }).__mp = this;
+    if (this.debugOn && !this.isHost) this.debugEl = createDebugOverlay();
     for (let i = 0; i < 40; i++) {
       this.waves.push({
         x: Math.random() * this.worldW,
@@ -2181,6 +2193,14 @@ export class MpSession {
     const t = this.targets[this.you];
     if (!ship || !t) return;
 
+    const now = performance.now();
+    const gapMs = this.prevStateAt ? now - this.prevStateAt : 0;
+    this.prevStateAt = now;
+    const beforeX = ship.x;
+    const beforeY = ship.y;
+    const bufLenBefore = this.stepBuffer.length;
+    const ackLag = this.inputSeq - t.ack;
+
     let cutoff = 0;
     while (this.pendingAcks.length && this.pendingAcks[0].seq <= t.ack) {
       cutoff = this.pendingAcks.shift()!.steps;
@@ -2193,6 +2213,23 @@ export class MpSession {
     for (const s of this.stepBuffer) {
       ship.boostFactor = s.boost;
       ship.update(s.dt, s.turn, this.worldW, this.worldH, s.sf, s.braking);
+    }
+
+    if (this.debugOn) {
+      const jump = Math.hypot(ship.x - beforeX, ship.y - beforeY);
+      // A big gap since the last snapshot, or a big correction once one
+      // finally arrives, is the signature of a real network stall. Small
+      // jumps every snapshot are normal (that's the replay working).
+      if (gapMs > 100 || jump > 15) {
+        const t0 = performance.now();
+        const line = `[${(t0 / 1000).toFixed(1)}s] gap=${gapMs.toFixed(0)}ms jump=${jump.toFixed(0)}px ackLag=${ackLag} buf=${bufLenBefore}→${this.stepBuffer.length}`;
+        this.debugLog.push(line);
+        if (this.debugLog.length > 30) this.debugLog.shift();
+      }
+      if (this.debugEl) {
+        const live = `live: ackLag=${ackLag} buf=${this.stepBuffer.length} sinceSnap=${gapMs.toFixed(0)}ms\n─── events (gap>100ms or jump>15px) ───\n`;
+        this.debugEl.textContent = live + this.debugLog.join('\n');
+      }
     }
   }
 
@@ -2929,4 +2966,17 @@ export class MpSession {
 function cleanName(name: string): string {
   const n = String(name).trim().slice(0, 16);
   return n.length > 0 ? n : 'Captain';
+}
+
+/** TEMPORARY netcode diagnostics overlay — see the `debugOn` field. A plain
+ *  DOM element (not canvas-drawn) so it's readable and screenshot-able over
+ *  the game, and selectable if someone wants to copy the text instead. */
+function createDebugOverlay(): HTMLPreElement {
+  const el = document.createElement('pre');
+  el.style.cssText =
+    'position:fixed;top:8px;right:8px;z-index:9999;max-width:46vw;max-height:70vh;overflow:auto;' +
+    'margin:0;padding:8px 10px;background:rgba(0,0,0,0.75);color:#7fffb0;' +
+    'font:11px/1.4 ui-monospace,monospace;white-space:pre-wrap;pointer-events:auto;user-select:text;';
+  document.body.appendChild(el);
+  return el;
 }
