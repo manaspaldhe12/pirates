@@ -1922,6 +1922,14 @@ export class MpSession {
   private onHostMessage(msg: H2CMsg, code: string) {
     if (!this.active || !msg || typeof msg !== 'object') return;
 
+    // TEMPORARY: raw record of every message as it arrives, so a real gap
+    // between 'state' messages (or anything unexpected in between) shows up
+    // directly in the console timeline instead of only in the summarized
+    // debug overlay. Same ?debug toggle; remove alongside it.
+    if (this.debugOn) {
+      console.log(`[recv ${(performance.now() / 1000).toFixed(3)}s]`, msg.t, msg);
+    }
+
     switch (msg.t) {
       case 'reject':
         this.fail(msg.reason);
