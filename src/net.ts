@@ -46,6 +46,8 @@ export interface PickupState {
 export interface ShipState {
   x: number;
   y: number;
+  vx: number; // world-space velocity, px/s (measured, includes wind/whirlpool/knockback) — for guest dead-reckoning between snapshots
+  vy: number;
   heading: number;
   health: number;
   sink: number;

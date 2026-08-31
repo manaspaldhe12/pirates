@@ -185,6 +185,7 @@ const WHEEL_DEADZONE = 40;
 
 const SNAPSHOT_INTERVAL = 1 / 30;
 const INPUT_INTERVAL = 0.05; // guest input heartbeat
+const MAX_SHIP_VEL = 600; // px/s cap on the velocity reported in a snapshot (see sendSnapshot)
 const END_DELAY = 1.7; // let the sinking animation play before declaring a winner
 const WAVE_DRIFT = 14;
 const SMOOTH_RATE = 14; // guest position smoothing for other ships (higher = snappier)
@@ -197,6 +198,7 @@ const SNAP_DIST = 250; // beyond this a target jump is a wrap/teleport — snap,
 const CATCHUP_MIN = 80;
 const CATCHUP_SPEED = 900; // px/s the local ship "dashes" at while catching up
 const CATCHUP_TURN_RATE = 8; // heading catch-up blend rate (higher = snappier)
+const EXTRAPOLATE_MAX = 0.2; // s — cap on dead-reckoning other ships past their last snapshot
 
 // Humans sail vivid hulls, bots sail greys — so the real players pop out of a
 // crowded bot fleet at a glance. (Your own hull is repainted pink locally, so
@@ -447,6 +449,12 @@ export class MpSession {
   private pendingEvents: GameEvent[] = [];
   private endTimer = -1;
   private snapshotAcc = 0;
+  // Measured per-ship velocity for guest dead-reckoning (see sendSnapshot):
+  // real position delta since the last snapshot, not a formula recomputed
+  // from speed/wind — so it automatically captures whirlpool current, ram
+  // knockback, anything else that moves a ship outside Ship.update() too.
+  private prevSnapPos: Array<{ x: number; y: number }> = [];
+  private prevSnapAt = -1;
 
   // Guest state
   private conn: DataConnection | null = null;
@@ -1882,11 +1890,32 @@ export class MpSession {
   }
 
   private sendSnapshot() {
+    const now = performance.now();
+    const dt = this.prevSnapAt > 0 ? (now - this.prevSnapAt) / 1000 : SNAPSHOT_INTERVAL;
+    this.prevSnapAt = now;
+    const velocities = this.ships.map((s, i) => {
+      const prev = this.prevSnapPos[i] ?? { x: s.x, y: s.y };
+      // wrapDelta so a world-edge crossing between snapshots reads as the
+      // real short displacement, not a delta the size of the whole map.
+      const dx = wrapDelta(s.x - prev.x, this.worldW);
+      const dy = wrapDelta(s.y - prev.y, this.worldH);
+      this.prevSnapPos[i] = { x: s.x, y: s.y };
+      const vx = dx / dt;
+      const vy = dy / dt;
+      // Clamp: a respawn teleport or a hard ram knockback is a real jump,
+      // not sustained motion — reporting it as velocity would send a guest's
+      // dead-reckoning flying off in a straight line for no reason.
+      const speed = Math.hypot(vx, vy);
+      const scale = speed > MAX_SHIP_VEL ? MAX_SHIP_VEL / speed : 1;
+      return { vx: vx * scale, vy: vy * scale };
+    });
     const msg: H2CMsg = {
       t: 'state',
       ships: this.ships.map((s, i) => ({
         x: s.x,
         y: s.y,
+        vx: velocities[i].vx,
+        vy: velocities[i].vy,
         heading: s.heading,
         health: s.health,
         sink: s.sinkProgress,
@@ -1976,6 +2005,8 @@ export class MpSession {
         this.targets = msg.ships.map((sp) => ({
           x: sp.x,
           y: sp.y,
+          vx: 0,
+          vy: 0,
           heading: sp.heading,
           health: SHIP_TYPES[sp.type].maxHealth,
           sink: 0,
@@ -2037,6 +2068,8 @@ export class MpSession {
           this.targets.push({
             x: sp.x,
             y: sp.y,
+            vx: 0,
+            vy: 0,
             heading: sp.heading,
             health: SHIP_TYPES[sp.type].maxHealth,
             sink: 0,
@@ -2136,15 +2169,24 @@ export class MpSession {
     this.predictOwnShip(dt, turn, dive);
 
     const k = 1 - Math.exp(-SMOOTH_RATE * dt);
+    // Dead-reckon other ships from their last snapshot's velocity instead of
+    // gliding toward a point frozen since it arrived — between updates they
+    // keep sailing along their real heading rather than lagging behind it,
+    // and a normal ~33ms gap needs far less catch-up once the next snapshot
+    // lands. Capped short: extrapolating a turning bot's straight-line guess
+    // for too long overshoots, so past EXTRAPOLATE_MAX just use the raw point.
+    const age = Math.min((performance.now() - this.lastSnapAt) / 1000, EXTRAPOLATE_MAX);
     this.ships.forEach((ship, i) => {
       const t = this.targets[i];
       if (!t) return;
       if (i !== this.you) {
-        const dx = t.x - ship.x;
-        const dy = t.y - ship.y;
+        const tx = ((t.x + t.vx * age) % this.worldW + this.worldW) % this.worldW;
+        const ty = ((t.y + t.vy * age) % this.worldH + this.worldH) % this.worldH;
+        const dx = tx - ship.x;
+        const dy = ty - ship.y;
         if (Math.abs(dx) > SNAP_DIST || Math.abs(dy) > SNAP_DIST) {
-          ship.x = t.x;
-          ship.y = t.y;
+          ship.x = tx;
+          ship.y = ty;
           ship.heading = t.heading;
         } else {
           ship.x += dx * k;
